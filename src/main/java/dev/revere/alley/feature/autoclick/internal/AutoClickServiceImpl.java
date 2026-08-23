@@ -15,6 +15,7 @@ import com.comphenix.protocol.wrappers.nbt.NbtFactory;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.bootstrap.AlleyContext;
 import dev.revere.alley.bootstrap.annotation.Service;
+import dev.revere.alley.core.config.ConfigService;
 import dev.revere.alley.feature.autoclick.AutoClickService;
 import dev.revere.alley.feature.cps.CPSListener;
 import dev.revere.alley.feature.knockback.KnockbackManager;
@@ -34,7 +35,6 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -105,7 +105,7 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
 
     @Override
     public void initialize(AlleyContext context) {
-        loadConfiguration();
+        reloadConfiguration();
         this.protocolManager = ProtocolLibrary.getProtocolManager();
         this.plugin.getServer().getPluginManager().registerEvents(this, this.plugin);
         registerPacketListener();
@@ -170,13 +170,16 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
         return session != null && session.enabled;
     }
 
-    private void loadConfiguration() {
-        File file = new File(this.plugin.getDataFolder(), "autoclick.yml");
-        if (!file.exists()) {
-            this.plugin.saveResource("autoclick.yml", false);
-        }
-
-        FileConfiguration config = YamlConfiguration.loadConfiguration(file);
+    /**
+     * (Re-)loads the autoclick.yml settings. Called on startup and whenever
+     * /alley reload re-reads all configuration files, so edits to autoclick.yml
+     * take effect without a restart.
+     */
+    @Override
+    public void reloadConfiguration() {
+        ConfigService configService = AlleyPlugin.getInstance().getService(ConfigService.class);
+        FileConfiguration config = configService.getAutoClickConfig();
+        File file = configService.getConfigFile("autoclick.yml");
         double cps = Math.max(1.0D, Math.min(20.0D, config.getDouble("attacks-per-second", 10.0D)));
         this.attackPeriodTicks = Math.max(1, (int) Math.round(20.0D / cps));
         this.maxAttackRange = Math.max(1.0D, config.getDouble("max-attack-range", 3.0D));
@@ -193,12 +196,7 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
             this.plugin.getLogger().warning(
                     "AutoClick probe material was forced to END_GATEWAY because other blocks may collide or cannot be targeted.");
             config.set("probe.material", Material.END_GATEWAY.name());
-            try {
-                config.save(file);
-            } catch (java.io.IOException exception) {
-                this.plugin.getLogger().warning("Unable to migrate autoclick.yml probe material: "
-                        + exception.getMessage());
-            }
+            configService.saveConfig(file, config);
         }
         this.probeMaterial = Material.END_GATEWAY;
     }

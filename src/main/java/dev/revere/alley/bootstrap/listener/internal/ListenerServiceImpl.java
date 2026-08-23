@@ -15,6 +15,8 @@ import dev.revere.alley.bootstrap.listener.ListenerService;
 import dev.revere.alley.feature.emoji.listener.EmojiListener;
 import dev.revere.alley.feature.event.listener.EventListener;
 import dev.revere.alley.feature.item.listener.ItemListener;
+import dev.revere.alley.feature.item.listener.CustomItemListener;
+import dev.revere.alley.feature.item.listener.GrapplingHookListener;
 import dev.revere.alley.feature.layout.listener.LayoutListener;
 import dev.revere.alley.feature.ffa.listener.FFAListener;
 import dev.revere.alley.feature.ffa.listener.FFABlockListener;
@@ -68,6 +70,8 @@ public class ListenerServiceImpl implements ListenerService {
                 new CraftingListener(),
 
                 new ItemListener(),
+                new CustomItemListener(),
+                new GrapplingHookListener(),
                 kitSettingSwimmingListener,
 
                 new FFAListener(), new FFACuboidListener(),

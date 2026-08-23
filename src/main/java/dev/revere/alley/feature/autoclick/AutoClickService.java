@@ -17,4 +17,7 @@ public interface AutoClickService extends Service {
 
     /** Return whether a player currently has autoclick enabled. */
     boolean isEnabled(Player player);
+
+    /** Re-reads the autoclick.yml settings from disk (used by /alley reload). */
+    void reloadConfiguration();
 }

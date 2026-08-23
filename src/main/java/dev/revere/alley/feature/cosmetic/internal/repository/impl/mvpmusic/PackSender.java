@@ -45,9 +45,9 @@ public final class PackSender implements Listener {
                 return;
             }
 
-            plugin.getLogger().info("[Alley] Pushing MVP pack to " + event.getPlayer().getName()
+            plugin.getLogger().info("[Alley] Pushing resource pack to " + event.getPlayer().getName()
                     + " -> " + url);
-            event.getPlayer().setResourcePack(url, sha1, "Alley MVP Music", true);
+            event.getPlayer().setResourcePack(url, sha1, "Alley resources", true);
         }, 20L);
     }
 

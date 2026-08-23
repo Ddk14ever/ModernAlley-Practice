@@ -45,4 +45,10 @@ public interface FFASpawnService extends Service {
      * @return Cuboid 对象，如果未正确加载则为 null。
      */
     Cuboid getCuboid();
+
+    /**
+     * Re-reads the FFA spawn cuboid from storage/arenas.yml (used by /alley reload).
+     * 从 storage/arenas.yml 重新读取 FFA 出生点区域（由 /alley reload 调用）。
+     */
+    void loadCuboid();
 }

@@ -101,4 +101,8 @@ public interface ConfigService extends Service {
 
     FileConfiguration getChallengesConfig();
 
+    FileConfiguration getCustomItemsConfig();
+
+    FileConfiguration getAutoClickConfig();
+
 }

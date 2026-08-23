@@ -10,6 +10,7 @@ import dev.revere.alley.feature.cooldown.Cooldown;
 import dev.revere.alley.feature.cooldown.CooldownService;
 import dev.revere.alley.feature.cooldown.CooldownType;
 import dev.revere.alley.feature.item.ItemService;
+import dev.revere.alley.feature.item.CustomItemType;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -69,6 +70,13 @@ public class ItemListener implements Listener {
                 player.getInventory().setItemInMainHand(null);
             }
             itemService.performHeadConsume(player, item);
+            return;
+        }
+
+        if (itemService.getCustomItemType(item) == CustomItemType.SPECIAL_GOLDEN_APPLE) {
+            event.setCancelled(true);
+            event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+            itemService.performSpecialGoldenAppleConsume(player, item);
         }
     }
 

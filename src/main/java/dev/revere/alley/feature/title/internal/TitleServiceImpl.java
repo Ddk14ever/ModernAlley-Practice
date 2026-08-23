@@ -43,10 +43,11 @@ public class TitleServiceImpl implements TitleService {
 
     @Override
     public void initialize(AlleyContext context) {
-        this.loadTitles();
+        this.reloadTitles();
     }
 
-    private void loadTitles() {
+    @Override
+    public void reloadTitles() {
         FileConfiguration config = this.configService.getTitlesConfig();
         String path = "titles.";
         int missingKits = 0;

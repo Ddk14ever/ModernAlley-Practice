@@ -22,4 +22,7 @@ public interface BotService extends Service {
     boolean startMatch(Player player, Kit kit, String difficultyId);
 
     void endMatch(Player player, boolean playerWon);
+
+    /** Re-reads the bot difficulty profiles from providers/bots.yml (used by /alley reload). */
+    void reloadProfiles();
 }

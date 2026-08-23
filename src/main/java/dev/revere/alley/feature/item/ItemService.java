@@ -6,11 +6,8 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * @author Emmy
- * 作者 Emmy
  * @project alley-practice
- * 项目 alley-practice
  * @since 18/07/2025
- * 自 18/07/2025
  */
 public interface ItemService extends Service {
     /**
@@ -22,6 +19,20 @@ public interface ItemService extends Service {
      */
     ItemStack getGoldenHead();
 
+    ItemStack getSpecialGoldenApple();
+
+    ItemStack getAk47();
+
+    ItemStack getAwp();
+
+    ItemStack getGrapplingHook();
+
+    CustomItemType getCustomItemType(ItemStack item);
+
+    int getAmmo(ItemStack weapon);
+
+    void setAmmo(ItemStack weapon, int ammo);
+
     /**
      * Performs the consume action for a golden head item when used by a player.
      * 当玩家使用金头物品时执行消耗操作。
@@ -32,4 +43,12 @@ public interface ItemService extends Service {
      * 表示正在消耗的金头的 ItemStack。
      */
     void performHeadConsume(Player player, ItemStack item);
+
+    void performSpecialGoldenAppleConsume(Player player, ItemStack item);
+
+    /**
+     * Re-reads providers/textures.yml and providers/custom-items.yml and
+     * rebuilds all custom items (used by /alley reload).
+     */
+    void reloadItems();
 }

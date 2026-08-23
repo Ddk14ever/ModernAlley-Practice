@@ -166,6 +166,10 @@ public class KnockbackListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void computeVelocity(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
+        // Alley weapon damage is intentionally damage-only. Its listener sets
+        // this one-event marker before Bukkit applies damage so neither
+        // Default nor Legacy can queue a later velocity packet.
+        if (victim.hasMetadata("alley_weapon_no_kb")) return;
         PlayerKnockbackData data = manager.getPlayerData(victim);
         if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK
                 && event.getDamager() instanceof Player attacker

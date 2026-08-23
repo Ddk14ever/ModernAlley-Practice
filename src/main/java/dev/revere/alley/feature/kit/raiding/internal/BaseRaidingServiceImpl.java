@@ -43,6 +43,7 @@ public class BaseRaidingServiceImpl implements BaseRaidingService {
         this.loadRaidingKitMappings();
     }
 
+    @Override
     public void loadRaidingKitMappings() {
         this.raidingKitMappings.clear();
         FileConfiguration config = this.configService.getKitsConfig();

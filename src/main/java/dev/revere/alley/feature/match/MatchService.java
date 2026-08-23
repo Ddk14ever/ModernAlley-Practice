@@ -144,4 +144,10 @@ public interface MatchService extends Service {
      *                   第二个参与者。
      */
     void createTournamentMatch(Tournament tournament, Kit kit, Arena arena, GameParticipant<MatchGamePlayer> pA, GameParticipant<MatchGamePlayer> pB);
+
+    /**
+     * Re-reads the match-blocked commands from settings.yml (used by /alley reload).
+     * 从 settings.yml 重新读取比赛禁用指令列表（由 /alley reload 调用）。
+     */
+    void reloadBlockedCommands();
 }

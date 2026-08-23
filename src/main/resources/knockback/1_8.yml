@@ -7,7 +7,7 @@ horizontal:
   air: 0.38
   sprint_extra: 0.5
   # One-shot horizontal bonus after a valid STOP -> START -> melee-hit W-tap.
-  wtap_extra: 0.1
+  wtap_extra: 0.15
 vertical:
   ground: 0.3375
   air: 0.33

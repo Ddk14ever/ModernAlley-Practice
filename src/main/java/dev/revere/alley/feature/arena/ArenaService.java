@@ -142,4 +142,16 @@ public interface ArenaService extends Service {
      *         ArenaValidator 实例。
      */
     ArenaValidator getArenaValidator();
+
+    /**
+     * Re-reads all arenas from storage/arenas.yml (used by /alley reload).
+     * 从 storage/arenas.yml 重新读取所有竞技场（由 /alley reload 调用）。
+     */
+    void loadArenas();
+
+    /**
+     * Rebuilds the arena index caches from the in-memory arena list.
+     * 根据内存中的竞技场列表重建竞技场索引缓存。
+     */
+    void refreshCaches();
 }

@@ -39,10 +39,11 @@ public class SpawnServiceImpl implements SpawnService {
 
     @Override
     public void initialize(AlleyContext context) {
-        this.loadSpawnLocation();
+        this.reloadSpawnLocation();
     }
 
-    private void loadSpawnLocation() {
+    @Override
+    public void reloadSpawnLocation() {
         Location location = Serializer.deserializeLocation(this.localeService.getString(SettingsLocaleImpl.SERVER_SPAWN_LOCATION));
         if (location == null) {
             Logger.error("Spawn location is null.");

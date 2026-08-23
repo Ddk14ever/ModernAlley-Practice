@@ -38,7 +38,7 @@ public class LevelServiceImpl implements LevelService {
 
     @Override
     public void initialize(AlleyContext context) {
-        this.loadLevels();
+        this.reloadLevels();
     }
 
     @Override
@@ -46,7 +46,8 @@ public class LevelServiceImpl implements LevelService {
         return Collections.unmodifiableList(this.levels);
     }
 
-    private void loadLevels() {
+    @Override
+    public void reloadLevels() {
         this.levels.clear();
         FileConfiguration config = this.configService.getLevelsConfig();
         ConfigurationSection levelsSection = config.getConfigurationSection("levels");

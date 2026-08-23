@@ -454,6 +454,7 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onRodLaunch(ProjectileLaunchEvent e) {
         if (!(e.getEntity() instanceof FishHook hook)) return;
+        if (hook.hasMetadata(dev.revere.alley.feature.item.listener.GrapplingHookListener.HOOK_METADATA)) return;
         if (!(hook.getShooter() instanceof Player p)) return;
         if (!svc.hasSwordBlockKB(p.getUniqueId())) return;
 
@@ -504,6 +505,7 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFishingRodHit(ProjectileHitEvent e) {
         if (!(e.getEntity() instanceof FishHook hook)) return;
+        if (hook.hasMetadata(dev.revere.alley.feature.item.listener.GrapplingHookListener.HOOK_METADATA)) return;
         if (!(hook.getShooter() instanceof Player attacker)) return;
         if (!svc.hasSwordBlockKB(attacker.getUniqueId())) return;
 
@@ -536,6 +538,7 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFishingReel(PlayerFishEvent e) {
         if (e.getState() != PlayerFishEvent.State.CAUGHT_ENTITY) return;
+        if (e.getHook().hasMetadata(dev.revere.alley.feature.item.listener.GrapplingHookListener.HOOK_METADATA)) return;
         if (!svc.hasSwordBlockKB(e.getPlayer().getUniqueId())) return;
         applyFishingRodHit(e.getHook(), e.getPlayer(), e.getCaught());
         e.setCancelled(true);

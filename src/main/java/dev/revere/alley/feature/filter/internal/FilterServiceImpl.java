@@ -48,11 +48,13 @@ public class FilterServiceImpl implements FilterService {
 
     @Override
     public void initialize(AlleyContext context) {
-        this.notificationMessage = this.localeService.getString(SettingsLocaleImpl.PROFANITY_FILTER_STAFF_NOTIFICATION_FORMAT);
-        this.loadFilteredWords();
+        this.reloadFilteredWords();
     }
 
-    private void loadFilteredWords() {
+    @Override
+    public void reloadFilteredWords() {
+        this.notificationMessage = this.localeService.getString(SettingsLocaleImpl.PROFANITY_FILTER_STAFF_NOTIFICATION_FORMAT);
+        this.filteredWords.clear();
         List<String> words = this.localeService.getStringListRaw(SettingsLocaleImpl.PROFANITY_FILTER_FILTERED_WORDS_LIST);
         this.filteredWords.addAll(words);
 

@@ -61,4 +61,10 @@ public interface DivisionService extends Service {
      *         排名最高的部门，如果未加载任何部门则返回null。
      */
     Division getHighestDivision();
+
+    /**
+     * Re-reads all divisions from storage/divisions.yml (used by /alley reload).
+     * 从 storage/divisions.yml 重新读取所有部门（由 /alley reload 调用）。
+     */
+    void reloadDivisions();
 }

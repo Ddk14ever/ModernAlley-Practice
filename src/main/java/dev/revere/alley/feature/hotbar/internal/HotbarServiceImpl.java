@@ -78,6 +78,16 @@ public class HotbarServiceImpl implements HotbarService {
 
     @Override
     public void initialize(AlleyContext context) {
+        this.loadHotbars();
+    }
+
+    @Override
+    public void reloadHotbars() {
+        this.hotbarItems.clear();
+        this.loadHotbars();
+    }
+
+    private void loadHotbars() {
         FileConfiguration hotbarConfig = this.configService.getHotbarConfig();
         ConfigurationSection hotbarSection = hotbarConfig.getConfigurationSection("hotbar-items");
         if (hotbarSection == null) {

@@ -97,6 +97,10 @@ public final class BotMatchSession {
     private static final double BLOCK_HIT_TRIGGER_RATE = 0.15D;
     private static final double BLOCK_HIT_MOVEMENT_SCALE = 0.2D;
     private static final double BLOCK_HIT_MOVEMENT_STEP = 0.2D;
+    /** A received Legacy KB must actually lift the Bot before it can arm a crit retry. */
+    private static final double LEGACY_CRIT_MIN_UPWARD_KB = 0.08D;
+    /** Do not retain a stale airborne-combat marker after the normal jump arc has ended. */
+    private static final int LEGACY_CRIT_WINDOW_TICKS = 14;
     private static final int BOW_CHARGE_TICKS = 18;
     private static final int BOW_USE_DURATION_TICKS = 72_000;
     private static final int BLOCK_AIM_TICKS = 2;
@@ -196,6 +200,8 @@ public final class BotMatchSession {
     private int legacyInputRecoveryTick;
     private int legacySprintResumeTick;
     private int lastLegacyKnockbackRecoveryTick = Integer.MIN_VALUE;
+    private int legacyCritWindowUntilTick;
+    private boolean legacyCritAttackReady;
 
     public BotMatchSession(BotServiceImpl service, Player player, Kit kit, Arena arena,
                            BotDifficultyProfile difficulty, FileConfiguration config,
@@ -445,6 +451,7 @@ public final class BotMatchSession {
         // clear the next frame's input before it was ever applied.
         nativeBot.tick();
         AlleyPlugin.getInstance().getService(KnockbackManager.class).updateMovementState(bot);
+        updateLegacyKnockbackCritWindow();
         if (ticks <= 40 || ticks % 20 == 0) nativeBot.refreshTrackingFor(player);
     }
 
@@ -585,6 +592,11 @@ public final class BotMatchSession {
         if (usesLegacyBotMovement() && velocity != null
                 && velocity.getX() * velocity.getX() + velocity.getZ() * velocity.getZ() > 1.0E-4D) {
             handleAcceptedBotKnockback();
+        }
+        if (usesLegacyBotMovement() && velocity != null
+                && velocity.getY() >= LEGACY_CRIT_MIN_UPWARD_KB) {
+            this.legacyCritWindowUntilTick = this.ticks + LEGACY_CRIT_WINDOW_TICKS;
+            this.legacyCritAttackReady = false;
         }
         if (this.debug) {
             trace("KB applied via " + source + " profile=" + data.getProfileName()
@@ -972,9 +984,12 @@ public final class BotMatchSession {
         if (runningTicks < difficulty.getReactionTicks()) return;
         if (!isWithinRange(difficulty.getSwingRange()) || !hasClearLineOfSight()) return;
 
-        attackProgress = Math.min(1.0, attackProgress + difficulty.getCps() / 20.0);
-        if (attackProgress < 1.0) return;
-        attackProgress -= 1.0;
+        boolean criticalRetry = this.legacyCritAttackReady;
+        if (!criticalRetry) {
+            attackProgress = Math.min(1.0, attackProgress + difficulty.getCps() / 20.0);
+            if (attackProgress < 1.0) return;
+            attackProgress -= 1.0;
+        }
 
         double attackReach = rollAttackReach();
         if (!isWithinRange(attackReach)) {
@@ -986,6 +1001,27 @@ public final class BotMatchSession {
             return;
         }
         attackAsPlayer();
+        if (criticalRetry) this.legacyCritAttackReady = false;
+    }
+
+    /**
+     * Runs after the Bot's native physics tick. This intentionally observes the
+     * real fall distance/vertical velocity that the Legacy crit listener will
+     * read on the next attack, rather than synthesizing either value.
+     */
+    private void updateLegacyKnockbackCritWindow() {
+        if (!usesLegacyBotMovement()) return;
+        if (this.ticks > this.legacyCritWindowUntilTick || bot.isOnGround()
+                || bot.isInWater() || bot.isClimbing()) {
+            this.legacyCritWindowUntilTick = 0;
+            this.legacyCritAttackReady = false;
+            return;
+        }
+
+        Vector velocity = bot.getVelocity();
+        if (velocity.getY() < 0.0D && bot.getFallDistance() > 0.0F) {
+            this.legacyCritAttackReady = true;
+        }
     }
 
     private void attackAsPlayer() {
@@ -1078,6 +1114,9 @@ public final class BotMatchSession {
         this.blockHitUntilTick = this.ticks + BLOCK_HIT_USE_TICKS;
         this.blockHitMovementScale = approach(this.blockHitMovementScale,
                 BLOCK_HIT_MOVEMENT_SCALE, BLOCK_HIT_MOVEMENT_STEP);
+        setBotSprinting(false);
+        this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
+                this.ticks + this.legacySprintRestartDelayTicks);
         legacyCombat.setBlocking(bot.getUniqueId(), true);
         try {
             bot.startUsingItem(EquipmentSlot.HAND);
@@ -1099,6 +1138,7 @@ public final class BotMatchSession {
     private void finishBotBlockHit() {
         if (!this.blockHitActive) return;
 
+        boolean completedReset = this.ticks >= this.blockHitUntilTick;
         this.blockHitActive = false;
         this.blockHitUntilTick = 0;
         LegacyCombatService legacyCombat = getLegacyCombatService();
@@ -1106,6 +1146,10 @@ public final class BotMatchSession {
             legacyCombat.setBlocking(bot.getUniqueId(), false);
         }
         if (bot != null && bot.hasActiveItem()) bot.clearActiveItem();
+        if (completedReset && bot != null) {
+            AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                    .armLegacyWTapExtra(bot);
+        }
     }
 
     private LegacyCombatService getLegacyCombatService() {

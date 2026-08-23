@@ -35,7 +35,7 @@ public class ConfigServiceImpl implements ConfigService {
             scoreboardConfig, tabListConfig, divisionsConfig, menusConfig, titlesConfig, levelsConfig,
             pearlConfig, abilityConfig, visualsConfig, saltyMessagesConfig, yeetMessagesConfig,
             nerdMessagesConfig, spigotCommunityMessagesConfig, texturesConfig, hotbarConfig, botConfig,
-            challengesConfig;
+            challengesConfig, customItemsConfig, autoClickConfig;
 
     private final String[] configFileNames = {
             "database/database.yml",
@@ -47,6 +47,7 @@ public class ConfigServiceImpl implements ConfigService {
 
             "providers/scoreboard.yml", "providers/tab-list.yml", "providers/textures.yml", "storage/hotbar.yml",
             "providers/pearls.yml", "providers/abilities.yml", "providers/visuals.yml", "providers/bots.yml",
+            "providers/custom-items.yml", "autoclick.yml",
 
             "cosmetics/messages/salty_messages.yml", "cosmetics/messages/yeet_messages.yml",
             "cosmetics/messages/nerd_messages.yml", "cosmetics/messages/spigot_community_messages.yml",
@@ -181,6 +182,8 @@ public class ConfigServiceImpl implements ConfigService {
         this.hotbarConfig = this.getConfig("storage/hotbar.yml");
         this.botConfig = this.getConfig("providers/bots.yml");
         this.challengesConfig = this.getConfig("challenges.yml");
+        this.customItemsConfig = this.getConfig("providers/custom-items.yml");
+        this.autoClickConfig = this.getConfig("autoclick.yml");
         this.saltyMessagesConfig = this.getConfig("cosmetics/messages/salty_messages.yml");
         this.yeetMessagesConfig = this.getConfig("cosmetics/messages/yeet_messages.yml");
         this.nerdMessagesConfig = this.getConfig("cosmetics/messages/nerd_messages.yml");

@@ -66,4 +66,10 @@ public interface KitService extends Service {
     void deleteKit(Kit kit);
 
     void saveKits();
+
+    /**
+     * Re-reads all kits from storage/kits.yml (used by /alley reload).
+     * 从 storage/kits.yml 重新读取所有工具包（由 /alley reload 调用）。
+     */
+    void loadKits();
 }

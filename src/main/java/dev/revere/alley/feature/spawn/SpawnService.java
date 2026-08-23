@@ -36,4 +36,10 @@ public interface SpawnService extends Service {
      *        要传送的玩家。
      */
     void teleportToSpawn(Player player);
+
+    /**
+     * Re-reads the spawn location from settings.yml (used by /alley reload).
+     * 从 settings.yml 重新读取出生点位置（由 /alley reload 调用）。
+     */
+    void reloadSpawnLocation();
 }

@@ -69,6 +69,34 @@ public class HologramManager implements dev.revere.alley.bootstrap.lifecycle.Ser
         this.runnables.clear();
     }
 
+    /**
+     * Re-reads holograms.yml from disk and rebuilds all holograms.
+     * Called by /alley reload so manually edited hologram entries take
+     * effect without a server restart.
+     */
+    public void reload() {
+        for (HologramRunnable runnable : this.runnables) {
+            runnable.cancel();
+        }
+        this.runnables.clear();
+        for (Hologram holo : this.holograms.values()) {
+            holo.setEnabled(false);
+            holo.despawn();
+        }
+        this.holograms.clear();
+
+        this.configFile = new File(AlleyPlugin.getInstance().getDataFolder(), "holograms.yml");
+        if (!this.configFile.exists()) {
+            try {
+                this.configFile.createNewFile();
+            } catch (IOException e) {
+                AlleyPlugin.getInstance().getLogger().warning("Failed to create holograms.yml: " + e.getMessage());
+            }
+        }
+        this.config = YamlConfiguration.loadConfiguration(this.configFile);
+        this.loadAll();
+    }
+
     // ========================
     // CRUD
     // ========================

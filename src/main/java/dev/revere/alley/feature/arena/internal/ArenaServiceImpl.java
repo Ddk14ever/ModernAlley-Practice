@@ -151,7 +151,9 @@ public class ArenaServiceImpl implements ArenaService {
      * Method to load all arenas from the arenas.yml file.
      * 从 arenas.yml 文件中加载所有竞技场的方法。
      */
+    @Override
     public void loadArenas() {
+        this.arenas.clear();
         FileConfiguration config = configService.getArenasConfig();
         ConfigurationSection arenasConfig = config.getConfigurationSection("arenas");
 
@@ -610,6 +612,7 @@ public class ArenaServiceImpl implements ArenaService {
      * Refresh caches when kits or arenas are modified
      * 当套件或竞技场被修改时刷新缓存
      */
+    @Override
     public void refreshCaches() {
         CompletableFuture.runAsync(this::buildCaches, executorService);
     }

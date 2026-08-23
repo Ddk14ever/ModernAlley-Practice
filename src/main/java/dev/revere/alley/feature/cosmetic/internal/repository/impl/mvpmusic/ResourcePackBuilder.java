@@ -15,8 +15,8 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Builds a static Minecraft resource pack containing all MVP music .ogg files
- * and a {@code sounds.json} mapping each song to a custom sound event.
+ * Builds the shared Alley resource pack, containing MVP music, its
+ * {@code sounds.json} mapping, and CustomModelData weapon models.
  * <p>
  * The pack is generated once at startup into the plugin data folder and
  * served to players via {@code server.properties resource-pack=} or
@@ -43,7 +43,7 @@ public final class ResourcePackBuilder {
 
     public static final String PACK_FILE_NAME = "alley_mvp_music.zip";
     private static final int PACK_FORMAT = 75; // Minecraft 1.21.11
-    private static final int PACK_REVISION = 6;
+    private static final int PACK_REVISION = 10;
     private static final String REVISION_ENTRY = "alley-pack-revision.txt";
 
     private ResourcePackBuilder() {}
@@ -129,6 +129,15 @@ public final class ResourcePackBuilder {
                 writeSoundsJson(zos);
                 zos.closeEntry();
 
+                // Weapon models are selected by CustomModelData, so ordinary
+                // bows and spyglasses keep their vanilla models.
+                writeWeaponModelOverrides(plugin, zos);
+
+                // The AWP scope wears a pumpkin; this override replaces the
+                // pumpkin's screen overlay with the vanilla telescope scope
+                // texture, so the scope looks like a real telescope lens.
+                writeScopeOverlay(plugin, zos);
+
                 // END_GATEWAY has an empty collision shape and a full-cube
                 // outline, making it ideal for the AutoClick input probe. Its
                 // portal shader always writes alpha=1, so a transparent texture
@@ -182,6 +191,44 @@ public final class ResourcePackBuilder {
         }
         sb.append("}");
         zos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeWeaponModelOverrides(AlleyPlugin plugin, ZipOutputStream zos) throws IOException {
+        // These model/texture files come from the supplied AK-47 and AWP
+        // packs. They are copied under the Alley namespace, so vanilla bows,
+        // spyglasses and every other kit remain untouched.
+        writeResourceEntry(plugin, zos, "assets/alley/models/item/ak47.json", "weapons/models/ak47.json");
+        writeResourceEntry(plugin, zos, "assets/alley/textures/item/ak47.png", "weapons/textures/ak47.png");
+        writeResourceEntry(plugin, zos, "assets/alley/models/item/awp.json", "weapons/models/awp.json");
+        writeResourceEntry(plugin, zos, "assets/alley/textures/item/awp.png", "weapons/textures/awp.png");
+        writeTextEntry(zos, "assets/alley/items/ak47.json", """
+                {"model":{"type":"minecraft:model","model":"alley:item/ak47"}}
+                """);
+        writeTextEntry(zos, "assets/alley/items/awp.json", """
+                {"model":{"type":"minecraft:model","model":"alley:item/awp"}}
+                """);
+    }
+
+    private static void writeScopeOverlay(AlleyPlugin plugin, ZipOutputStream zos) throws IOException {
+        // The vanilla telescope scope texture, served as the pumpkin overlay.
+        // Wearing a pumpkin (used by the AWP scope) then shows the telescope
+        // lens instead of the carved-pumpkin face.
+        writeResourceEntry(plugin, zos, "assets/minecraft/textures/misc/pumpkinblur.png",
+                "misc/pumpkinblur.png");
+        writeResourceEntry(plugin, zos, "assets/minecraft/textures/misc/pumpkinblur.png.mcmeta",
+                "misc/pumpkinblur.png.mcmeta");
+    }
+
+    private static void writeResourceEntry(AlleyPlugin plugin, ZipOutputStream zos,
+                                           String packPath, String resourcePath) throws IOException {
+        try (InputStream input = plugin.getResource(resourcePath)) {
+            if (input == null) {
+                throw new FileNotFoundException("Missing bundled resource: " + resourcePath);
+            }
+            zos.putNextEntry(new ZipEntry(packPath));
+            input.transferTo(zos);
+            zos.closeEntry();
+        }
     }
 
     private static boolean isCurrentRevision(Path packFile) {

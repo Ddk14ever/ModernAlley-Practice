@@ -68,7 +68,7 @@ public class BotServiceImpl implements BotService {
 
     @Override
     public void initialize(AlleyContext context) {
-        loadProfiles();
+        reloadProfiles();
         cleanupStaleBots();
         context.getPlugin().getServer().getScheduler().runTaskLater(
                 context.getPlugin(), this::cleanupStaleBots, 40L);
@@ -127,7 +127,8 @@ public class BotServiceImpl implements BotService {
         ProtocolLibrary.getProtocolManager().addPacketListener(this.inventoryPacketListener);
     }
 
-    private void loadProfiles() {
+    @Override
+    public void reloadProfiles() {
         profiles.clear();
         ConfigService configService = AlleyPlugin.getInstance().getService(ConfigService.class);
         FileConfiguration config = configService.getBotConfig();

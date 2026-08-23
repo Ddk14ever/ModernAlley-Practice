@@ -68,4 +68,10 @@ public interface BaseRaidingService extends Service {
      * @return 如果工具包有掠夺角色映射则返回 True。
      */
     boolean hasRaidingKit(Kit kit);
+
+    /**
+     * Re-reads all raiding kit role mappings from storage/kits.yml (used by /alley reload).
+     * 从 storage/kits.yml 重新读取所有掠夺工具包角色映射（由 /alley reload 调用）。
+     */
+    void loadRaidingKitMappings();
 }

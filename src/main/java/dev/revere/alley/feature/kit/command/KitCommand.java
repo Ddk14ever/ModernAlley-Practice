@@ -65,6 +65,7 @@ public class KitCommand extends BaseCommand {
 
         if (args.length == 3) {
             switch (args[0].toLowerCase()) {
+                case "extraitems" -> completion.addAll(List.of("add"));
                 case "setsetting" -> this.plugin.getService(KitSettingService.class).getSettings()
                         .forEach(setting -> completion.add(setting.getName()));
                 case "seteditable" -> completion.addAll(List.of("true", "false"));
@@ -77,6 +78,12 @@ public class KitCommand extends BaseCommand {
                         .forEach(role -> completion.add(role.name().toLowerCase()));
                 default -> { }
             }
+            return completion;
+        }
+
+        if (args.length == 4 && args[0].equalsIgnoreCase("extraitems")
+                && args[2].equalsIgnoreCase("add")) {
+            completion.addAll(List.of("ak47", "awp", "grapplinghook", "specialapple", "goldenhead"));
             return completion;
         }
 
@@ -160,7 +167,8 @@ public class KitCommand extends BaseCommand {
             {
                     " &6│ &6/kit setinventory &8(&7kitName&8) &7| Set inventory of a kit",
                     " &6│ &6/kit getinventory &8(&7kitName&8) &7| Get inventory of a kit",
-                    " &6│ &6/kit extraitems &8(&7kitName&8) &7| Edit the extra items of a kit"
+                    " &6│ &6/kit extraitems &8(&7kitName&8) &7| Edit the extra items of a kit",
+                    " &6│ &6/kit extraitems &8(&7kitName&8) add &8(&7ak47/awp/grapplinghook/specialapple&8) &7| Add an Alley item"
             },
             {
                     " &6│ &6/kit addpotion &8(&7kitName&8) &7| Set potion effects of a kit",

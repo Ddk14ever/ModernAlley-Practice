@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class LegacySprintTracker {
     private static final long WTAP_WINDOW_NANOS = TimeUnit.MILLISECONDS.toNanos(350L);
-    private static final long WTAP_EXTRA_LIFETIME_NANOS = TimeUnit.MILLISECONDS.toNanos(500L);
+    private static final long WTAP_EXTRA_LIFETIME_NANOS = TimeUnit.MILLISECONDS.toNanos(800L);
     private static final WTapResult NO_WTAP = new WTapResult(false, false);
 
     private final KnockbackManager manager;
@@ -95,6 +95,12 @@ public final class LegacySprintTracker {
     public boolean consumeWTapExtraEligibility(Player player) {
         SprintState state = this.states.get(player.getUniqueId());
         return state != null && state.consumeWTapExtraEligibility();
+    }
+
+    /** Arms the same one-shot bonus for a completed Legacy block-hit reset. */
+    public void armWTapExtraEligibility(Player player) {
+        SprintState state = state(player);
+        state.armWTapExtraEligibility();
     }
 
     /** Clears expired one-shot W-tap bonuses from retained player sprint states. */
@@ -195,6 +201,10 @@ public final class LegacySprintTracker {
             if (!hasWTapExtraEligibility(System.nanoTime())) return false;
             this.wtapExtraExpiresAtNanos = Long.MIN_VALUE;
             return true;
+        }
+
+        private synchronized void armWTapExtraEligibility() {
+            this.wtapExtraExpiresAtNanos = System.nanoTime() + WTAP_EXTRA_LIFETIME_NANOS;
         }
 
         private synchronized void expireWTapExtraEligibility(long now) {

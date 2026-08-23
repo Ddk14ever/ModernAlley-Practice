@@ -140,4 +140,10 @@ public interface HotbarService extends Service {
      *         菜单实例
      */
     Menu getMenuInstanceFromName(String name, Player player);
+
+    /**
+     * Re-reads all hotbar items from storage/hotbar.yml (used by /alley reload).
+     * 从 storage/hotbar.yml 重新读取所有快捷栏物品（由 /alley reload 调用）。
+     */
+    void reloadHotbars();
 }

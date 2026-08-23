@@ -1,0 +1,67 @@
+# First-pass custom item/weapon settings. Values are intentionally easy to tune.
+special-golden-apple:
+  material: GOLDEN_APPLE
+  name: "&6&lSpecial Golden Apple"
+  lore:
+    - "&7Golden Head effects without Speed."
+
+ak47:
+  # SHEARS supplies a visible durability bar without a vanilla use/FOV
+  # state. The resource pack replaces its model through item_model.
+  material: SHEARS
+  # Only the AK-47 receives this model id; normal bows are untouched.
+  custom-model-data: 14001
+  name: "&7&lAK-47"
+  lore:
+    - "&8Hold right-click to fire automatically."
+    - "&8Use the off-hand swap key as reload."
+  magazine-size: 30
+  shots-per-second: 10.0
+  damage: 12.0
+  projectile-speed: 3.0
+  spread: 0.015
+  reload-ticks: 40
+  switch-ticks: 24
+  attack-speed: 0.833333
+  trail-particle: FLAME
+  muzzle-particle: SMOKE
+
+awp:
+  # DIAMOND_HOE base: not a "usable" item, so the client never enters an
+  # item-use state (which would suppress left-click). The AWP model comes from
+  # item_model, and the hoe's durability bar shows the ammo. Scoping wears a
+  # pumpkin (telescope-lens overlay), slows while aiming, and zooms through a
+  # negative walkSpeed ability + movement-speed modifier (see scope-fov below).
+  material: DIAMOND_HOE
+  # Only the AWP receives this model id; normal hoes are untouched.
+  custom-model-data: 14002
+  name: "&6&lAWP"
+  lore:
+    - "&8Right-click to scope."
+    - "&8Left-click to fire one shot (scoped or unscoped)."
+  magazine-size: 5
+  damage: 30.0
+  projectile-speed: 8.0
+  reload-ticks: 60
+  switch-ticks: 24
+  shot-cooldown-ticks: 24
+  attack-speed: 0.833333
+  # Total visible FOV (degrees) while scoped. Applied by setting the client's
+  # walkSpeed ability negative + a movement-speed modifier; values above 35
+  # (the 0.5x zoom floor) degrade to 35. Assumes the default 70 FOV setting.
+  scope-fov: 20
+
+grappling-hook:
+  # Uses the vanilla fishing-rod model. The persistent id makes only this rod
+  # use the grappling behavior; normal fishing rods remain unchanged.
+  material: FISHING_ROD
+  name: "&b&l抓钩"
+  lore:
+    - "&8右键抛出钩子。"
+    - "&8再次右键收回并向钩子方向加速。"
+  # Final speed = base-speed + hook-distance * distance-speed.
+  base-speed: 3.0
+  distance-speed: 5.0
+  max-speed: 10.0
+  min-distance: 4.0
+  max-lifetime-ticks: 200

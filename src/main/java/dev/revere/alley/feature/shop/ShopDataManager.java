@@ -24,6 +24,18 @@ public class ShopDataManager implements dev.revere.alley.bootstrap.lifecycle.Ser
 
     @Override
     public void initialize(AlleyContext context) {
+        this.load();
+    }
+
+    /**
+     * Re-reads shop.yml from disk. Called by /alley reload so shop overrides
+     * take effect without a server restart.
+     */
+    public void reload() {
+        this.load();
+    }
+
+    private void load() {
         this.configFile = new File(AlleyPlugin.getInstance().getDataFolder(), "shop.yml");
         if (!this.configFile.exists()) {
             try {

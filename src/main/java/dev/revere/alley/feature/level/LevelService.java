@@ -105,4 +105,10 @@ public interface LevelService extends Service {
      *         格式化后的进度详情字符串。
      */
     String getProgressDetails(int elo);
+
+    /**
+     * Re-reads all level tiers from storage/levels.yml (used by /alley reload).
+     * 从 storage/levels.yml 重新读取所有等级层级（由 /alley reload 调用）。
+     */
+    void reloadLevels();
 }

@@ -420,6 +420,12 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 && legacySprintTracker.consumeWTapExtraEligibility(player);
     }
 
+    public void armLegacyWTapExtra(Player player) {
+        if (legacySprintTracker != null && isLegacyKnockback(player)) {
+            legacySprintTracker.armWTapExtraEligibility(player);
+        }
+    }
+
     /** Records a confirmed Legacy melee hit before the MONITOR knockback phase. */
     public LegacySprintTracker.WTapResult recordLegacyMeleeHit(Player player) {
         return recordLegacyWTapHit(player);

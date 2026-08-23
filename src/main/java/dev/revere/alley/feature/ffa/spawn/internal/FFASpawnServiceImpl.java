@@ -48,6 +48,7 @@ public class FFASpawnServiceImpl implements FFASpawnService {
      * Load the FFA spawn location from the arenas.yml file
      * 从 arenas.yml 文件加载 FFA 出生点位置
      */
+    @Override
     public void loadCuboid() {
         FileConfiguration config = this.configService.getArenasConfig();
         Arena arena = this.arenaService.getArenas().stream()

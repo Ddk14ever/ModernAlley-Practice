@@ -87,7 +87,7 @@ public class MatchServiceImpl implements MatchService {
     @Override
     public void initialize(AlleyContext context) {
         this.registerMatchFactories();
-        this.loadBlockedCommands();
+        this.reloadBlockedCommands();
         this.legacyCombatService = new LegacyCombatService(AlleyPlugin.getInstance());
         this.legacyCombatService.start();
         AlleyPlugin.getInstance().getServer().getPluginManager()
@@ -311,7 +311,9 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    private void loadBlockedCommands() {
+    @Override
+    public void reloadBlockedCommands() {
+        this.blockedCommands.clear();
         List<String> blockedCommands = this.localeService.getStringListRaw(SettingsLocaleImpl.GAME_BLOCKED_COMMANDS_DURING_MATCH_LIST);
         if (blockedCommands.isEmpty()) {
             Logger.info("No blocked commands found in the configuration. Please check your settings.yml file.");

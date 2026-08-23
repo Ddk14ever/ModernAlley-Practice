@@ -32,4 +32,10 @@ public interface FilterService extends Service {
      * @param offender The player who sent the message.
      */
     void notifyStaff(String message, Player offender);
+
+    /**
+     * Re-reads the profanity filter settings from settings.yml (used by /alley reload).
+     * 从 settings.yml 重新读取脏话过滤器设置（由 /alley reload 调用）。
+     */
+    void reloadFilteredWords();
 }

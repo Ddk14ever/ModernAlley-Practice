@@ -38,7 +38,7 @@ public class DivisionServiceImpl implements DivisionService {
 
     @Override
     public void initialize(AlleyContext context) {
-        this.loadDivisions();
+        this.reloadDivisions();
     }
 
     @Override
@@ -56,7 +56,9 @@ public class DivisionServiceImpl implements DivisionService {
      * Method to load all divisions from the divisions.yml file.
      * 从divisions.yml文件中加载所有部门的方法。
      */
-    private void loadDivisions() {
+    @Override
+    public void reloadDivisions() {
+        this.divisions.clear();
         FileConfiguration config = this.configService.getDivisionsConfig();
         ConfigurationSection divisionsSection = config.getConfigurationSection("divisions");
 
