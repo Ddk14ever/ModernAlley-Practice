@@ -16,9 +16,6 @@ import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.wrappers.EnumWrappers;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.attribute.Attribute;
-import org.bukkit.attribute.AttributeInstance;
-import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.entity.Entity;
@@ -77,10 +74,6 @@ public final class CustomItemListener implements Listener {
     private final Map<UUID, PotionEffect> displacedSlowness = new ConcurrentHashMap<>();
     /** Helmet worn before the scope pumpkin, so it can be restored on unscope. */
     private final Map<UUID, ItemStack> scopedHelmet = new ConcurrentHashMap<>();
-    /** Scope-zoom state: transient speed modifier, and the pre-scope walk speed / speed base. */
-    private final Map<UUID, AttributeModifier> scopedSpeedModifier = new ConcurrentHashMap<>();
-    private final Map<UUID, Float> scopedWalkSpeedBefore = new ConcurrentHashMap<>();
-    private final Map<UUID, Double> scopedSpeedBaseBefore = new ConcurrentHashMap<>();
     private final Set<UUID> weaponNoKnockback = ConcurrentHashMap.newKeySet();
 
     public CustomItemListener() {
@@ -214,9 +207,6 @@ public final class CustomItemListener implements Listener {
         this.experienceHudOverride.remove(event.getPlayer().getUniqueId());
         this.displacedSlowness.remove(event.getPlayer().getUniqueId());
         this.scopedHelmet.remove(event.getPlayer().getUniqueId());
-        this.scopedSpeedModifier.remove(event.getPlayer().getUniqueId());
-        this.scopedWalkSpeedBefore.remove(event.getPlayer().getUniqueId());
-        this.scopedSpeedBaseBefore.remove(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -229,9 +219,6 @@ public final class CustomItemListener implements Listener {
         this.awpCooldownUntil.remove(event.getEntity().getUniqueId());
         this.weaponEquipped.remove(event.getEntity().getUniqueId());
         this.experienceHudOverride.remove(event.getEntity().getUniqueId());
-        this.scopedSpeedModifier.remove(event.getEntity().getUniqueId());
-        this.scopedWalkSpeedBefore.remove(event.getEntity().getUniqueId());
-        this.scopedSpeedBaseBefore.remove(event.getEntity().getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -616,17 +603,6 @@ public final class CustomItemListener implements Listener {
         }
     }
 
-    /** Assumed vanilla base FOV (degrees) used to convert scope-fov into a multiplier. */
-    private static final double VANILLA_FOV = 70.0D;
-    /**
-     * Client walkSpeed ability applied while scoped. The 1.21.11 client renders
-     * FOV = fov-setting * ((movementSpeed / walkSpeed + 1) / 2), so with a
-     * positive walkSpeed the zoom can never go below 0.5x (FOV 35). A negative
-     * walkSpeed is therefore required to reach the configured scope-fov: -0.1
-     * paired with a 0.0429 movement speed gives exactly FOV 20 at the 70 setting.
-     */
-    private static final double SCOPE_WALK_SPEED = -0.1D;
-
     private void applyScopeVisual(Player player) {
         // Pumpkin in the helmet slot renders the pumpkinblur overlay, which the
         // resource pack replaces with the vanilla telescope scope lens.
@@ -643,51 +619,22 @@ public final class CustomItemListener implements Listener {
     }
 
     /**
-     * Applies or clears the scoped zoom. The client's FOV multiplier is
-     * ((movementSpeed / walkSpeed + 1) / 2), so scoping sets a negative
-     * walkSpeed ability (synced through the ABILITIES packet) and a transient
-     * movement-speed modifier calibrated so the multiplier equals
-     * scope-fov / 70. setWalkSpeed also pins the speed attribute's base to zero,
-     * which gives a clean base for the modifier. The aim-slow is the reduced
-     * movement speed itself, so no Slowness potion is used while scoped.
+     * Scope must never alter the player's walk speed or movement-speed
+     * attribute. The previous negative walk-speed/FOV calibration could make
+     * the client treat the player as immobile. A scoped AWP now uses the normal
+     * movement pipeline and the Slowness II effect applied by
+     * {@link #updateAwpSlowness(Player, ItemService)}.
      */
     private void setScopeFov(Player player, boolean scoped) {
-        UUID id = player.getUniqueId();
-        AttributeInstance speed = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (speed == null) return;
-        if (scoped) {
-            double scopeFov = config().getDouble("awp.scope-fov", 20.0D);
-            double targetMultiplier = scopeFov / VANILLA_FOV;
-            // FOV multiplier = (speed / walkSpeed + 1) / 2  ->  speed = walkSpeed * (2*m - 1).
-            // Clamp so a scope-fov above 35 (which would need a negative speed)
-            // degrades to the 0.5x floor (FOV 35) instead of breaking movement.
-            double targetSpeed = Math.max(0.0D, SCOPE_WALK_SPEED * (2.0 * targetMultiplier - 1.0));
-            this.scopedWalkSpeedBefore.put(id, player.getWalkSpeed());
-            this.scopedSpeedBaseBefore.put(id, speed.getBaseValue());
-            player.removePotionEffect(PotionEffectType.SLOWNESS);
-            // Bukkit's value is double the ability; this also zeroes the speed base.
-            player.setWalkSpeed((float) (SCOPE_WALK_SPEED * 2.0F));
-            double current = speed.getValue();
-            AttributeModifier modifier = new AttributeModifier(
-                    new NamespacedKey(AlleyPlugin.getInstance(), "awp_scope_speed"),
-                    targetSpeed - current, AttributeModifier.Operation.ADD_NUMBER);
-            speed.addTransientModifier(modifier);
-            this.scopedSpeedModifier.put(id, modifier);
-        } else {
-            AttributeModifier modifier = this.scopedSpeedModifier.remove(id);
-            if (modifier != null) speed.removeModifier(modifier);
-            Float priorWalk = this.scopedWalkSpeedBefore.remove(id);
-            if (priorWalk != null) player.setWalkSpeed(priorWalk);
-            Double priorBase = this.scopedSpeedBaseBefore.remove(id);
-            if (priorBase != null) speed.setBaseValue(priorBase);
-        }
+        // The pumpkin overlay supplies the scope visual. Do not modify walk
+        // speed or the movement attribute: the former negative walk-speed
+        // calibration made the client unable to move after right-clicking.
     }
 
     /**
-     * Holding the AWP applies a small slow. While scoped the slow comes from the
-     * movement-speed modifier set by setScopeFov instead, and the potion is kept
-     * off so the FOV calibration (which depends on the exact speed value) is not
-     * disturbed. Any pre-existing slowness is captured and restored on un-hold.
+     * Holding the AWP applies Slowness I; while scoped this becomes Slowness II.
+     * Any pre-existing slowness is captured and restored when the weapon is no
+     * longer held.
      */
     private void updateAwpSlowness(Player player, ItemService items) {
         UUID id = player.getUniqueId();
@@ -707,7 +654,8 @@ public final class CustomItemListener implements Listener {
             awpSlowed.add(id);
         }
         if (scoped.contains(id)) {
-            player.removePotionEffect(PotionEffectType.SLOWNESS);
+            // Bukkit amplifiers are zero based: amplifier 1 is Slowness II.
+            player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 5, 1, false, false, false), true);
             return;
         }
         player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 5, 0, false, false, false), true);

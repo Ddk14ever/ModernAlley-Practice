@@ -47,6 +47,9 @@ public class Kit {
     private String hideAndSeekSeekerKit;
     private String hideAndSeekHiderKit;
     private String skyWarsResourceKit;
+    private String luckyBlockGreenKit;
+    private String luckyBlockBlueKit;
+    private String luckyBlockYellowKit;
     private BotAiMode botAiMode;
 
     private KitCategory category;
@@ -110,6 +113,9 @@ public class Kit {
         this.hideAndSeekSeekerKit = "";
         this.hideAndSeekHiderKit = "";
         this.skyWarsResourceKit = "";
+        this.luckyBlockGreenKit = "";
+        this.luckyBlockBlueKit = "";
+        this.luckyBlockYellowKit = "";
         this.botAiMode = BotAiMode.MELEE;
 
         this.kitSettings = new ArrayList<>();

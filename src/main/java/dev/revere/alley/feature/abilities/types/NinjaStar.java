@@ -75,11 +75,16 @@ public class NinjaStar extends Ability {
                 return;
             }
 
-            //if (!AbilityCooldowns.isOnCooldown("TELEPORT", player)) return;
+            UUID targetId = TAGGED.get(player.getUniqueId());
+            Player target = targetId == null ? null : Bukkit.getPlayer(targetId);
+            if (!isTeleportable(target)) {
+                TAGGED.remove(player.getUniqueId());
+                player.sendMessage(CC.translate("&cYou need to be damaged by a player before using Ninja Star."));
+                player.updateInventory();
+                return;
+            }
 
             PlayerUtil.decrement(player);
-
-            Player target = Bukkit.getPlayer(TAGGED.get(player.getUniqueId()));
 
             profile.getCooldown(NinjaStar.class).applyCooldown(player, 60 * 1000);
             profile.getGlobalCooldown(GlobalCooldown.PARTNER_ITEM).applyCooldown(player, 10 * 1000);
@@ -87,14 +92,15 @@ public class NinjaStar extends Ability {
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (target == null) {
+                    Player currentTarget = Bukkit.getPlayer(targetId);
+                    if (!player.isOnline() || !isTeleportable(currentTarget)) {
                         return;
                     }
-                    player.teleport(target.getLocation());
+                    player.teleport(currentTarget.getLocation());
                     player.sendMessage(CC.translate("&7You have been successfully teleported")); // you just got teleported back
                     // 你刚刚被传送回来了
                 }
-            }.runTaskLaterAsynchronously(this.plugin, (5 * 10));
+            }.runTaskLater(this.plugin, 5 * 10L);
 
             abilityService.sendCooldownExpiredMessage(player, this.getName(), this.getAbility());
             abilityService.sendPlayerMessage(player, this.getAbility());
@@ -102,5 +108,9 @@ public class NinjaStar extends Ability {
 
             TAGGED.remove(player.getUniqueId());
         }
+    }
+
+    private boolean isTeleportable(Player player) {
+        return player != null && !player.isDead() && (player.isOnline() || player.isValid());
     }
 }

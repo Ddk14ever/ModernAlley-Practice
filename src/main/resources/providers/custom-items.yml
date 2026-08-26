@@ -30,8 +30,8 @@ awp:
   # DIAMOND_HOE base: not a "usable" item, so the client never enters an
   # item-use state (which would suppress left-click). The AWP model comes from
   # item_model, and the hoe's durability bar shows the ammo. Scoping wears a
-  # pumpkin (telescope-lens overlay), slows while aiming, and zooms through a
-  # negative walkSpeed ability + movement-speed modifier (see scope-fov below).
+  # pumpkin (telescope-lens overlay) and applies Slowness II while preserving
+  # normal client movement.
   material: DIAMOND_HOE
   # Only the AWP receives this model id; normal hoes are untouched.
   custom-model-data: 14002
@@ -46,9 +46,8 @@ awp:
   switch-ticks: 24
   shot-cooldown-ticks: 24
   attack-speed: 0.833333
-  # Total visible FOV (degrees) while scoped. Applied by setting the client's
-  # walkSpeed ability negative + a movement-speed modifier; values above 35
-  # (the 0.5x zoom floor) degrade to 35. Assumes the default 70 FOV setting.
+  # Retained for configuration compatibility. Scope visual/movement behavior
+  # is controlled by the pumpkin overlay and Slowness II.
   scope-fov: 20
 
 grappling-hook:

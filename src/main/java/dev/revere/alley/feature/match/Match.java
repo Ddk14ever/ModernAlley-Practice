@@ -43,6 +43,7 @@ import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingCampProtect
 import dev.revere.alley.feature.kit.setting.types.mode.*;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingHealthBar;
 import dev.revere.alley.feature.layout.LayoutService;
+import dev.revere.alley.feature.luckyblock.LuckyBlockService;
 import dev.revere.alley.feature.layout.data.LayoutData;
 import dev.revere.alley.feature.match.data.MatchData;
 import dev.revere.alley.feature.match.data.types.MatchDataSolo;
@@ -250,6 +251,7 @@ public abstract class Match {
         this.sendPlayerVersusPlayerMessage();
 
         this.state = MatchState.STARTING;
+        this.plugin.getService(LuckyBlockService.class).prepareMatch(this);
 
         this.handleMatchTasks();
 
@@ -295,6 +297,7 @@ public abstract class Match {
 
     public void endMatch() {
         this.clearPearlCooldowns();
+        this.plugin.getService(LuckyBlockService.class).cleanupMatch(this);
 
         // Delay arena deletion by 3s so the match world stays loaded
         // while MVP music plays and players are still in it.
@@ -2162,6 +2165,7 @@ public abstract class Match {
 
     @SuppressWarnings("deprecation")
     public void resetBlockChanges() {
+        this.plugin.getService(LuckyBlockService.class).cleanupMatch(this);
         if (this.getKit().isSettingEnabled(KitSettingRaiding.class)) {
             Arena arena = this.getArena();
             Location pos1 = arena.getPos1();

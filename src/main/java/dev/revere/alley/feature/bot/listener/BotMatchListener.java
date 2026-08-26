@@ -4,6 +4,7 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.bot.BotAiMode;
 import dev.revere.alley.feature.bot.internal.BotServiceImpl;
 import dev.revere.alley.feature.bot.match.BotMatchSession;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingLuckyBlock;
 import dev.revere.alley.feature.match.internal.types.GomokuItems;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EnderPearl;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
@@ -80,7 +82,9 @@ public class BotMatchListener implements Listener {
             boolean pearlSelfDamage = damageByEntity.getDamager() instanceof EnderPearl
                     && attacker != null
                     && attacker.getUniqueId().equals(event.getEntity().getUniqueId());
-            if (!pearlSelfDamage && !isExpectedOpponent(session, event.getEntity(), attacker)) {
+            if (!pearlSelfDamage
+                    && !isLuckyBlockMobAttack(session, damageByEntity)
+                    && !isExpectedOpponent(session, event.getEntity(), attacker)) {
                 event.setCancelled(true);
                 return;
             }
@@ -135,6 +139,26 @@ public class BotMatchListener implements Listener {
             return attacker.getUniqueId().equals(session.getPlayerId());
         }
         return false;
+    }
+
+    /**
+     * Bot matches normally accept damage only from the two matched opponents.
+     * LuckyBlock is the explicit exception: mobs (and mob-fired projectiles)
+     * are allowed to hurt either active match player.
+     */
+    private boolean isLuckyBlockMobAttack(BotMatchSession session, EntityDamageByEntityEvent event) {
+        if (!session.getKit().isSettingEnabled(KitSettingLuckyBlock.class)
+                || !(event.getEntity() instanceof Player)) {
+            return false;
+        }
+
+        Entity causingEntity = event.getDamageSource().getCausingEntity();
+        return isNonPlayerLivingEntity(event.getDamager())
+                || isNonPlayerLivingEntity(causingEntity);
+    }
+
+    private boolean isNonPlayerLivingEntity(Entity entity) {
+        return entity instanceof LivingEntity && !(entity instanceof Player);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

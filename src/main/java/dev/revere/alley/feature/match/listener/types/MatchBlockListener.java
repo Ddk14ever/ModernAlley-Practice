@@ -13,7 +13,9 @@ import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBuildImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBreakArenaBlocksImpl;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingLuckyBlock;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingTimedBlocksImpl;
+import dev.revere.alley.feature.luckyblock.LuckyBlockService;
 import dev.revere.alley.feature.kit.setting.types.mode.*;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchService;
@@ -161,6 +163,9 @@ public class MatchBlockListener implements Listener {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
 
         Profile profile = profileService.getProfile(player.getUniqueId());
+        if (profile == null) {
+            return;
+        }
 
         Match match = profile.getMatch();
         if (match == null) {
@@ -181,6 +186,48 @@ public class MatchBlockListener implements Listener {
                 if (brokenType == Material.FIRE || brokenType == Material.SOUL_FIRE) {
                     event.setDropItems(false);
                     event.setExpToDrop(0);
+                    return;
+                }
+
+                LuckyBlockService luckyBlockService = AlleyPlugin.getInstance().getService(LuckyBlockService.class);
+                if (matchState == MatchState.RUNNING
+                        && match.getKit().isSettingEnabled(KitSettingLuckyBlock.class)
+                        && luckyBlockService.isLuckyBlock(brokenType)) {
+                    Block luckyBlock = event.getBlock();
+                    BlockState originalState = luckyBlock.getState();
+
+                    // LuckyBlock mode explicitly allows the three native
+                    // LuckyBlock powders to be broken, independently of the
+                    // normal Build/BreakArenaBlocks settings. Track the
+                    // original state so the arena is restored after the match.
+                    match.addBlockToBrokenBlocksMap(originalState, luckyBlock.getLocation());
+                    luckyBlockService.trackBrokenLuckyBlock(match, originalState, luckyBlock.getLocation());
+                    event.setDropItems(false);
+                    event.setExpToDrop(0);
+
+                    // The normal match protection pipeline can cancel a
+                    // BlockBreakEvent after this listener has awarded the
+                    // LuckyBlock reward. Perform the world mutation ourselves
+                    // and cancel the native break to guarantee the block is
+                    // gone immediately, while the saved original state still
+                    // restores it when the match ends.
+                    event.setCancelled(true);
+                    luckyBlock.setType(Material.AIR, false);
+
+                    java.util.Optional<ItemStack> reward = luckyBlockService
+                            .createRandomReward(match, brokenType);
+                    // A missing/empty reward-kit must not make the map block
+                    // unbreakable; it simply produces no reward or penalty.
+                    if (reward.isEmpty()) {
+                        return;
+                    }
+
+                    if (luckyBlockService.shouldApplyPenalty()) {
+                        luckyBlockService.applyRandomPenalty(player, match);
+                    } else {
+                        luckyBlock.getWorld().dropItemNaturally(
+                                luckyBlock.getLocation().add(0.5D, 0.5D, 0.5D), reward.get());
+                    }
                     return;
                 }
 

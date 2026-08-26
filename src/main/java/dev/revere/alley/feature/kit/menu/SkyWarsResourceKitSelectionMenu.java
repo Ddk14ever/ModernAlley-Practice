@@ -43,7 +43,7 @@ public class SkyWarsResourceKitSelectionMenu extends PaginatedMenu {
     public Map<Integer, Button> getGlobalButtons(Player player) {
         Map<Integer, Button> buttons = new HashMap<>();
         addGlassHeader(buttons, Material.BLACK_STAINED_GLASS_PANE);
-        buttons.put(48, new ClearButton());
+        buttons.put(49, new ClearButton());
         buttons.put(53, new BackButton());
         return buttons;
     }

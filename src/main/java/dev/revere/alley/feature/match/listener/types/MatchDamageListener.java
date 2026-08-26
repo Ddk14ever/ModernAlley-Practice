@@ -8,6 +8,7 @@ import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingNoDamageImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingNoFallDamageImpl;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingLuckyBlock;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingBoxing;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingHideAndSeek;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingSpleef;
@@ -30,6 +31,8 @@ import dev.revere.alley.common.reflect.internal.types.ActionBarReflectionService
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.common.text.Symbol;
 import org.bukkit.entity.Arrow;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -86,6 +89,15 @@ public class MatchDamageListener implements Listener {
                 return;
             }
 
+            // LuckyBlock intentionally keeps the arena dangerous: every
+            // non-player living entity may damage active players, including
+            // projectiles whose causing entity is a mob. This must bypass modes
+            // that normally reduce all combat damage to zero (Boxing, Sumo,
+            // Spleef and NoDamage), without opening player-versus-player damage.
+            if (isLuckyBlockMobDamage(event, match)) {
+                return;
+            }
+
             if (matchKit.isSettingEnabled(KitSettingBoxing.class)
                     || matchKit.isSettingEnabled(KitSettingSumo.class)
                     || matchKit.isSettingEnabled(KitSettingSpleef.class)
@@ -123,6 +135,7 @@ public class MatchDamageListener implements Listener {
         if (gamePlayer == null || gamePlayer.isDead()) return;
 
         Kit kit = match.getKit();
+        if (isLuckyBlockMobDamage(event, match)) return;
         if (!(kit.isSettingEnabled(KitSettingBoxing.class)
                 || kit.isSettingEnabled(KitSettingSumo.class)
                 || kit.isSettingEnabled(KitSettingSpleef.class)
@@ -348,5 +361,20 @@ public class MatchDamageListener implements Listener {
                 }
             }
         }
+    }
+
+    private boolean isLuckyBlockMobDamage(EntityDamageEvent event, Match match) {
+        if (!(event instanceof EntityDamageByEntityEvent damageEvent)
+                || !match.getKit().isSettingEnabled(KitSettingLuckyBlock.class)) {
+            return false;
+        }
+
+        Entity causingEntity = damageEvent.getDamageSource().getCausingEntity();
+        return isNonPlayerLivingEntity(damageEvent.getDamager())
+                || isNonPlayerLivingEntity(causingEntity);
+    }
+
+    private boolean isNonPlayerLivingEntity(Entity entity) {
+        return entity instanceof LivingEntity && !(entity instanceof Player);
     }
 }

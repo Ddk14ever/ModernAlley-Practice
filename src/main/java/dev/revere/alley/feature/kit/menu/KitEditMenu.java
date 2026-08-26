@@ -7,6 +7,7 @@ import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitCategory;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingHideAndSeek;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingLuckyBlock;
 import dev.revere.alley.library.menu.Button;
 import dev.revere.alley.library.menu.Menu;
 import org.bukkit.Material;
@@ -69,6 +70,9 @@ public class KitEditMenu extends Menu {
         buttons.put(43, new ToggleEditableButton(this.kit));
         if (this.kit.isSettingEnabled(KitSettingHideAndSeek.class)) {
             buttons.put(39, new HideAndSeekKitsButton(this.kit));
+        }
+        if (this.kit.isSettingEnabled(KitSettingLuckyBlock.class)) {
+            buttons.put(42, new LuckyBlockKitsButton(this.kit));
         }
         buttons.put(41, new SkyWarsResourceKitButton(this.kit));
 
@@ -543,6 +547,42 @@ public class KitEditMenu extends Menu {
                 new HideAndSeekKitSelectionMenu(this.kit, false).openMenu(player);
                 this.playNeutral(player);
             }
+        }
+    }
+
+    private static class LuckyBlockKitsButton extends Button {
+        private final Kit kit;
+
+        private LuckyBlockKitsButton(Kit kit) {
+            this.kit = kit;
+        }
+
+        @Override
+        public ItemStack getButtonItem(Player player) {
+            return new ItemBuilder(Material.CHEST)
+                    .name("&6&lLuckyBlock Reward Kits")
+                    .lore(
+                            CC.MENU_BAR,
+                            "&aGreen: &f" + displayName(this.kit.getLuckyBlockGreenKit()),
+                            "&bBlue: &f" + displayName(this.kit.getLuckyBlockBlueKit()),
+                            "&eYellow: &f" + displayName(this.kit.getLuckyBlockYellowKit()),
+                            "",
+                            "&eClick &7to select each color's reward Kit.",
+                            CC.MENU_BAR
+                    )
+                    .hideMeta()
+                    .build();
+        }
+
+        @Override
+        public void clicked(Player player, ClickType clickType) {
+            if (clickType != ClickType.LEFT) return;
+            new LuckyBlockKitsMenu(this.kit).openMenu(player);
+            this.playNeutral(player);
+        }
+
+        private static String displayName(String kitName) {
+            return kitName == null || kitName.isEmpty() ? "Not Set" : kitName;
         }
     }
 

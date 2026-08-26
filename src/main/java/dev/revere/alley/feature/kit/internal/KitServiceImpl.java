@@ -125,6 +125,9 @@ public class KitServiceImpl implements KitService {
             kit.setHideAndSeekSeekerKit(config.getString(key + ".hide-and-seek.seeker-kit", ""));
             kit.setHideAndSeekHiderKit(config.getString(key + ".hide-and-seek.hider-kit", ""));
             kit.setSkyWarsResourceKit(config.getString(key + ".skywars.resource-kit", ""));
+            kit.setLuckyBlockGreenKit(config.getString(key + ".lucky-block.green-kit", ""));
+            kit.setLuckyBlockBlueKit(config.getString(key + ".lucky-block.blue-kit", ""));
+            kit.setLuckyBlockYellowKit(config.getString(key + ".lucky-block.yellow-kit", ""));
             kit.setBotAiMode(BotAiMode.fromName(config.getString(key + ".bot.ai-mode", "MELEE")));
 
             this.setupFFA(kit, config, key);
@@ -531,6 +534,9 @@ public class KitServiceImpl implements KitService {
         config.set(key + ".hide-and-seek.seeker-kit", kit.getHideAndSeekSeekerKit());
         config.set(key + ".hide-and-seek.hider-kit", kit.getHideAndSeekHiderKit());
         config.set(key + ".skywars.resource-kit", kit.getSkyWarsResourceKit());
+        config.set(key + ".lucky-block.green-kit", kit.getLuckyBlockGreenKit());
+        config.set(key + ".lucky-block.blue-kit", kit.getLuckyBlockBlueKit());
+        config.set(key + ".lucky-block.yellow-kit", kit.getLuckyBlockYellowKit());
         config.set(key + ".bot.ai-mode", kit.getBotAiMode().name());
         config.set(key + ".items", Serializer.serializeItemStack(kit.getItems()));
         config.set(key + ".armor", Serializer.serializeItemStack(kit.getArmor()));

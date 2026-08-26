@@ -43,7 +43,7 @@ public final class ResourcePackBuilder {
 
     public static final String PACK_FILE_NAME = "alley_mvp_music.zip";
     private static final int PACK_FORMAT = 75; // Minecraft 1.21.11
-    private static final int PACK_REVISION = 10;
+    private static final int PACK_REVISION = 11;
     private static final String REVISION_ENTRY = "alley-pack-revision.txt";
 
     private ResourcePackBuilder() {}
@@ -138,6 +138,11 @@ public final class ResourcePackBuilder {
                 // texture, so the scope looks like a real telescope lens.
                 writeScopeOverlay(plugin, zos);
 
+                // Concrete powder uses Minecraft's cube_all block model. Each
+                // replacement texture is therefore rendered on all six faces,
+                // while the server still uses normal Bukkit block materials.
+                writeLuckyBlockTextures(plugin, zos);
+
                 // END_GATEWAY has an empty collision shape and a full-cube
                 // outline, making it ideal for the AutoClick input probe. Its
                 // portal shader always writes alpha=1, so a transparent texture
@@ -217,6 +222,15 @@ public final class ResourcePackBuilder {
                 "misc/pumpkinblur.png");
         writeResourceEntry(plugin, zos, "assets/minecraft/textures/misc/pumpkinblur.png.mcmeta",
                 "misc/pumpkinblur.png.mcmeta");
+    }
+
+    private static void writeLuckyBlockTextures(AlleyPlugin plugin, ZipOutputStream zos) throws IOException {
+        writeResourceEntry(plugin, zos, "assets/minecraft/textures/block/green_concrete_powder.png",
+                "luckyblock/green_concrete_powder.png");
+        writeResourceEntry(plugin, zos, "assets/minecraft/textures/block/blue_concrete_powder.png",
+                "luckyblock/blue_concrete_powder.png");
+        writeResourceEntry(plugin, zos, "assets/minecraft/textures/block/yellow_concrete_powder.png",
+                "luckyblock/yellow_concrete_powder.png");
     }
 
     private static void writeResourceEntry(AlleyPlugin plugin, ZipOutputStream zos,

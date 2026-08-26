@@ -171,7 +171,8 @@ EFFECT_DISABLER:
   ICON:
     DISPLAYNAME: '&6&lEffect Disabler'
     DESCRIPTION:
-      - '&fDefault desc.'
+      - '&fHit an opponent five times to remove'
+      - '&fall their active potion effects.'
     MATERIAL: SLIME_BALL
     DATA: 0
   COOLDOWN: 60

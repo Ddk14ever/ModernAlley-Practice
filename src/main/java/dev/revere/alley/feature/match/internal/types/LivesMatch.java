@@ -9,6 +9,9 @@ import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.queue.Queue;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitRunnable;
+
+import dev.revere.alley.AlleyPlugin;
 
 /**
  * @author Emmy
@@ -54,8 +57,11 @@ public class LivesMatch extends DefaultMatch {
     public void setupPlayer(Player player) {
         super.setupPlayer(player);
 
-        MatchGamePlayerData data = this.getGamePlayer(player).getData();
-        player.setMaxHealth(data.getLives() * 2);
+        player.setInvulnerable(false);
+
+        // Lives count controls round elimination only. Every life always uses
+        // the normal ten-heart health pool.
+        player.setMaxHealth(20.0D);
         player.setHealth(player.getMaxHealth());
     }
 
@@ -70,7 +76,7 @@ public class LivesMatch extends DefaultMatch {
      */
     public void reduceLife(Player player, MatchGamePlayerData data) {
         data.setLives(data.getLives() - 1);
-        player.setMaxHealth(data.getLives() <= 0 ? 20 : data.getLives() * 2);
+        player.setMaxHealth(20.0D);
         player.setHealth(player.getMaxHealth());
     }
 
@@ -89,6 +95,20 @@ public class LivesMatch extends DefaultMatch {
     @Override
     public void handleRespawn(Player player) {
         PlayerUtil.reset(player, true, false);
+
+        // A respawned Lives player gets one second of complete protection,
+        // independent of the kit's normal hurt-resistance configuration.
+        player.setMaxHealth(20.0D);
+        player.setHealth(player.getMaxHealth());
+        player.setInvulnerable(true);
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (player.isOnline() && player.isValid()) {
+                    player.setInvulnerable(false);
+                }
+            }
+        }.runTaskLater(AlleyPlugin.getInstance(), 20L);
 
         Location spawnLocation = this.getParticipants().get(0).containsPlayer(player.getUniqueId()) ? this.getArena().getPos1() : this.getArena().getPos2();
         player.teleport(spawnLocation);

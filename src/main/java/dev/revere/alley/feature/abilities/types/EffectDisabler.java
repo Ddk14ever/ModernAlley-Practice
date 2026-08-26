@@ -13,7 +13,6 @@ import dev.revere.alley.common.PlayerUtil;
 import dev.revere.alley.common.text.CC;
 import lombok.Getter;
 import lombok.Setter;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.block.Action;
@@ -55,8 +54,6 @@ public class EffectDisabler extends Ability {
 
             if (!isAbility(damager.getInventory().getItemInMainHand())) return;
 
-            if (isBard(victim) || isArcher(victim) || isRogue(victim) || isMiner(victim)) return;
-
             if (profile.getCooldown(EffectDisabler.class).onCooldown(damager)) {
                 damager.sendMessage(CC.translate("&fYou are on &6&lEffect Disabler &7cooldown for &4" + DurationFormatter.getRemaining(profile.getCooldown(EffectDisabler.class).getRemainingMillis(damager), true, true)));
                 damager.updateInventory();
@@ -75,7 +72,7 @@ public class EffectDisabler extends Ability {
 
             HITS.put(victim.getUniqueId(), HITS.get(victim.getUniqueId()) + 1);
 
-            if (HITS.get(victim.getUniqueId()) != 5) return;
+            if (HITS.get(victim.getUniqueId()) < 5) return;
 
             PlayerUtil.decrement(damager);
 
@@ -128,31 +125,4 @@ public class EffectDisabler extends Ability {
         }
     }
 
-    private boolean isBard(Player victim) {
-        return victim.getInventory().getHelmet() != null && victim.getInventory().getHelmet().getType().equals(Material.GOLDEN_HELMET)
-                && victim.getInventory().getChestplate() != null && victim.getInventory().getChestplate().getType().equals(Material.GOLDEN_CHESTPLATE)
-                && victim.getInventory().getLeggings() != null && victim.getInventory().getLeggings().getType().equals(Material.GOLDEN_LEGGINGS)
-                && victim.getInventory().getBoots() != null && victim.getInventory().getBoots().getType().equals(Material.GOLDEN_BOOTS);
-    }
-
-    private boolean isArcher(Player victim) {
-        return victim.getInventory().getHelmet() != null && victim.getInventory().getHelmet().getType().equals(Material.LEATHER_HELMET)
-                && victim.getInventory().getChestplate() != null && victim.getInventory().getChestplate().getType().equals(Material.LEATHER_CHESTPLATE)
-                && victim.getInventory().getLeggings() != null && victim.getInventory().getLeggings().getType().equals(Material.LEATHER_LEGGINGS)
-                && victim.getInventory().getBoots() != null && victim.getInventory().getBoots().getType().equals(Material.LEATHER_BOOTS);
-    }
-
-    private boolean isRogue(Player victim) {
-        return victim.getInventory().getHelmet() != null && victim.getInventory().getHelmet().getType().equals(Material.CHAINMAIL_HELMET)
-                && victim.getInventory().getChestplate() != null && victim.getInventory().getChestplate().getType().equals(Material.CHAINMAIL_CHESTPLATE)
-                && victim.getInventory().getLeggings() != null && victim.getInventory().getLeggings().getType().equals(Material.CHAINMAIL_LEGGINGS)
-                && victim.getInventory().getBoots() != null && victim.getInventory().getBoots().getType().equals(Material.CHAINMAIL_BOOTS);
-    }
-
-    private boolean isMiner(Player victim) {
-        return victim.getInventory().getHelmet() != null && victim.getInventory().getHelmet().getType().equals(Material.IRON_HELMET)
-                && victim.getInventory().getChestplate() != null && victim.getInventory().getChestplate().getType().equals(Material.IRON_CHESTPLATE)
-                && victim.getInventory().getLeggings() != null && victim.getInventory().getLeggings().getType().equals(Material.IRON_LEGGINGS)
-                && victim.getInventory().getBoots() != null && victim.getInventory().getBoots().getType().equals(Material.IRON_BOOTS);
-    }
 }
