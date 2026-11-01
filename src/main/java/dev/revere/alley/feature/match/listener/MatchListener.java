@@ -26,9 +26,12 @@ import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.utility.MatchUtility;
 import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.library.menu.Menu;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.damage.DamageType;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -42,6 +45,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.*;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -93,9 +97,7 @@ public class MatchListener implements Listener {
         if (profile.getState() == ProfileState.PLAYING && profile.getMatch().getState() == MatchState.RUNNING) {
             if (matchKit.isSettingEnabled(KitSettingSumo.class) || matchKit.isSettingEnabled(KitSettingSpleef.class)) {
                 if (player.getLocation().getBlock().getType() == Material.WATER || player.getLocation().getBlock().getType() == Material.WATER) {
-                    if (!handlePartyElimination(player, match, EntityDamageEvent.DamageCause.CUSTOM)) {
-                        player.setHealth(0);
-                    }
+                    eliminateMatchPlayer(player, match, EntityDamageEvent.DamageCause.CUSTOM);
                 }
             }
 
@@ -187,6 +189,122 @@ public class MatchListener implements Listener {
         }
     }
 
+    /**
+     * Intercepts lethal match damage before the native death pipeline and converts it
+     * into a synthetic death: the player stays alive the entire time, so the client
+     * never shows the death screen or the world-loading (dirt) animation that a real
+     * respawn triggers. Everything that used to run from PlayerDeathEvent (item drops,
+     * death messages, cosmetics, weapon/grapple cleanup, snapshots, match resolution,
+     * spectator/round-respawn bookkeeping) is dispatched through a synthetic
+     * PlayerDeathEvent here, then the victim's health is restored.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    private void onMatchLethalDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfile(player.getUniqueId());
+        if (profile == null || profile.getState() != ProfileState.PLAYING || profile.getMatch() == null) return;
+        // Native NPC bots have no client, so the vanilla death pipeline is fine for
+        // them; only real players need the seamless (no-respawn) transition.
+        BotMatchSession botSession = AlleyPlugin.getInstance().getService(BotService.class)
+                .getSession((Entity) player);
+        if (botSession != null && !player.getUniqueId().equals(botSession.getPlayerId())) return;
+        // Inside the legacy hurt window NMS rejects hits that do not exceed the last
+        // damage; only a larger (damage-delta) hit can still kill and must be caught.
+        if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .wasInsideHurtResistanceWindow(player)
+                && event.getFinalDamage() <= player.getLastDamage()) return;
+        // Absorption hearts are consumed first, so a hit is only lethal past them.
+        if (event.getFinalDamage() < player.getHealth() + player.getAbsorptionAmount()) return;
+        if (player.getInventory().getItemInMainHand().getType() == Material.TOTEM_OF_UNDYING
+                || player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING) return;
+
+        Match match = profile.getMatch();
+        // Party matches keep the victim alive through the existing elimination path.
+        if (handlePartyElimination(player, match, event.getCause())) {
+            event.setCancelled(true);
+            return;
+        }
+
+        // Cancel the lethal hit so health never reaches zero, and leave the next hit
+        // immediately acceptable for respawn-window kits (stale i-frames must not
+        // swallow the first attack after teleporting back to spawn).
+        event.setCancelled(true);
+        player.setNoDamageTicks(0);
+        dispatchSyntheticDeath(player, event.getDamageSource(), event.getCause());
+    }
+
+    /**
+     * Runs the seamless death flow for scripted eliminations (sumo/spleef water,
+     * wrong portal) that used to call {@code player.setHealth(0)} and therefore
+     * showed the vanilla death screen and world reload.
+     */
+    private boolean eliminateMatchPlayer(Player player, Match match,
+                                          EntityDamageEvent.DamageCause cause) {
+        if (handlePartyElimination(player, match, cause)) return true;
+
+        MatchGamePlayer gamePlayer = match.getFromAllGamePlayers(player);
+        if (gamePlayer == null || gamePlayer.isDead() || gamePlayer.isEliminated()) return true;
+
+        dispatchSyntheticDeath(player, null, cause);
+        return true;
+    }
+
+    /**
+     * Fires a synthetic PlayerDeathEvent so every existing death listener runs without
+     * the player actually dying, then restores health and clears the dead-state entries.
+     */
+    private void dispatchSyntheticDeath(Player player, DamageSource damageSource,
+                                        EntityDamageEvent.DamageCause cause) {
+        // PlayerInventory#getContents already covers storage, armour and off-hand,
+        // mirroring the item set a vanilla death event would expose.
+        List<ItemStack> drops = new ArrayList<>();
+        for (ItemStack stack : player.getInventory().getContents()) {
+            if (stack != null && !stack.getType().isAir()) drops.add(stack.clone());
+        }
+
+        DamageSource source = damageSource != null
+                ? damageSource
+                : DamageSource.builder(DamageType.GENERIC).withDirectEntity(player).build();
+        // Death messages resolve their cause from the victim's last damage event.
+        player.setLastDamageCause(new EntityDamageEvent(player, cause, source, 0.0D));
+        // The drop list is a copy: match handlers either drop it or clear it, exactly
+        // like the vanilla death event would.
+        PlayerDeathEvent synthetic = new PlayerDeathEvent(player, source, drops, 0, "");
+
+        // Run every existing death listener while the inventory is still intact so the
+        // post-match snapshot captures the real loadout.
+        Bukkit.getPluginManager().callEvent(synthetic);
+
+        // Simulate the vanilla death inventory wipe. The victim is still alive, so the
+        // server never does this for us.
+        player.getInventory().clear();
+        player.getInventory().setArmorContents(new ItemStack[4]);
+        player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+
+        if (player.isOnline()) {
+            player.setHealth(player.getMaxHealth());
+            player.setAbsorptionAmount(0.0D);
+        }
+        player.setFireTicks(0);
+        player.setFallDistance(0.0F);
+        player.setNoDamageTicks(0);
+
+        // The respawn-time pickup block is normally cleared from PlayerRespawnEvent,
+        // which no longer fires. Clear it once the victim is actually back in play.
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+            if (!player.isOnline()) return;
+            Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                    .getProfile(player.getUniqueId());
+            Match currentMatch = profile == null ? null : profile.getMatch();
+            MatchGamePlayer gamePlayer = currentMatch == null
+                    ? null : currentMatch.getFromAllGamePlayers(player);
+            if (gamePlayer != null && gamePlayer.isDead() && !gamePlayer.isEliminated()) return;
+            clearDeadPlayerPickupBlock(player);
+        }, 5L);
+    }
+
     @EventHandler
     private void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
@@ -220,27 +338,19 @@ public class MatchListener implements Listener {
             if (player.getUniqueId().equals(botSession.getPlayerId())) {
                 AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(
                         AlleyPlugin.getInstance(), player.spigot()::respawn, 1L);
-                AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(
-                        AlleyPlugin.getInstance(), () -> {
-                            if (player.isDead()) player.spigot().respawn();
-                        }, 2L);
             }
             return;
         }
 
         profile.getMatch().handleDeath(player, cause);
 
-        // Apply the match spectator state before sending the respawn packet. This
-        // prevents non-final FFA/split deaths from remaining on the death screen.
+        // Safety net only. Normal match deaths are intercepted in onMatchLethalDamage
+        // (synthetic death, player stays alive), so this never runs for them. It
+        // rescues the rare genuine death (e.g. an external plugin or an unhandled
+        // damage path) so the player cannot be stuck on the death screen.
         AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-            // Guard against double-respawn: handleRespawn may already have brought the
-            // player back by this tick, and respawning an alive player kicks them with
-            // a protocol error.
             if (player.isDead()) player.spigot().respawn();
         }, 1L);
-        AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-            if (player.isDead()) player.spigot().respawn();
-        }, 2L);
     }
 
     @EventHandler
@@ -272,6 +382,15 @@ public class MatchListener implements Listener {
             if (ListenerUtil.isSword(event.getItemDrop().getItemStack().getType())) {
                 event.setCancelled(true);
                 player.sendMessage(AlleyPlugin.getInstance().getService(LocaleService.class).getString(GameMessagesLocaleImpl.GAME_CANNOT_DROP_SWORD));
+                return;
+            }
+            // A dropped glass bottle is leftover from drinking; remove it on the next
+            // tick instead of letting it linger on the arena floor for five seconds.
+            if (event.getItemDrop().getItemStack().getType() == Material.GLASS_BOTTLE) {
+                org.bukkit.entity.Item bottle = event.getItemDrop();
+                Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+                    if (bottle.isValid()) bottle.remove();
+                });
                 return;
             }
         }
@@ -317,10 +436,69 @@ public class MatchListener implements Listener {
 
         ItemStack item = event.getItem();
         if (item.getType() == Material.POTION) {
-            AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-                player.getInventory().removeItem(new ItemStack(Material.GLASS_BOTTLE, 1));
+            // Vanilla inserts the empty bottle after this event. Remember how many the
+            // player already had so only the newly produced bottle is removed.
+            scheduleGlassBottleCleanup(player, countGlassBottles(player));
+        }
+    }
+
+    /**
+     * Removes the empty bottle produced by drinking, checking twice because some
+     * server implementations insert it after the consume event has finished.
+     * Only runs when the bottle count actually grew, so pre-existing bottles are
+     * never eaten.
+     */
+    public static void scheduleGlassBottleCleanup(Player player, int bottlesBefore) {
+        for (long delay : new long[]{1L, 2L}) {
+            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+                if (!player.isOnline()) return;
+                if (countGlassBottles(player) > bottlesBefore) {
+                    removeGlassBottles(player);
+                }
+                // Safety net for a full inventory: vanilla drops the bottle instead.
+                removeDroppedGlassBottlesNear(player);
                 player.updateInventory();
-            }, 1L);
+            }, delay);
+        }
+    }
+
+    /** Counts every glass bottle the player currently carries (inventory + off-hand). */
+    public static int countGlassBottles(Player player) {
+        int total = 0;
+        for (ItemStack stack : player.getInventory().getContents()) {
+            if (stack != null && stack.getType() == Material.GLASS_BOTTLE) total += stack.getAmount();
+        }
+        return total;
+    }
+
+    /**
+     * Removes a single glass bottle from the player's inventory without touching stacks
+     * of anything else. Used as the post-potion cleanup for match players.
+     */
+    public static void removeGlassBottles(Player player) {
+        ItemStack bottle = new ItemStack(Material.GLASS_BOTTLE, 1);
+        if (player.getInventory().removeItem(bottle).isEmpty()) {
+            return;
+        }
+        // Off-hand is not covered by the storage-inventory removal above.
+        ItemStack offHand = player.getInventory().getItemInOffHand();
+        if (offHand != null && offHand.getType() == Material.GLASS_BOTTLE) {
+            if (offHand.getAmount() > 1) offHand.setAmount(offHand.getAmount() - 1);
+            else player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+        }
+    }
+
+    /**
+     * Vanilla drops the empty bottle as an item entity when the inventory is full.
+     * Remove those fresh bottle drops so they do not linger on the arena floor.
+     */
+    public static void removeDroppedGlassBottlesNear(Player player) {
+        for (Entity entity : player.getNearbyEntities(3.0D, 3.0D, 3.0D)) {
+            if (entity instanceof org.bukkit.entity.Item item
+                    && item.getItemStack().getType() == Material.GLASS_BOTTLE
+                    && item.getTicksLived() <= 10) {
+                item.remove();
+            }
         }
     }
 
@@ -365,9 +543,7 @@ public class MatchListener implements Listener {
                         player.sendMessage(CC.translate("&cYou cannot enter your own portal!"));
 
                         if (match.getKit().isSettingEnabled(KitSettingRespawnTimer.class)) {
-                            if (!handlePartyElimination(player, match, EntityDamageEvent.DamageCause.CUSTOM)) {
-                                player.setHealth(0);
-                            }
+                            eliminateMatchPlayer(player, match, EntityDamageEvent.DamageCause.CUSTOM);
                             player.setAllowFlight(true);
                             player.setFlying(true);
                             player.setGameMode(GameMode.SPECTATOR);

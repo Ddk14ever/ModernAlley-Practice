@@ -65,7 +65,8 @@ final class LegacyProjectileCollisionTracker {
     }
 
     boolean isOwnerImmune(Projectile projectile) {
-        if (projectile instanceof EnderPearl) return true;
+        // 1.8 EntityThrowable#onUpdate skips the thrower only while ticksInAir < 5;
+        // after that the thrower can be hit by their own throwable (pearls included).
         return projectile.getTicksLived() < DEFAULT_OWNER_COLLISION_TICK;
     }
 
@@ -137,7 +138,7 @@ final class LegacyProjectileCollisionTracker {
             if (!this.pearlSizeWarningLogged) {
                 this.pearlSizeWarningLogged = true;
                 AlleyPlugin.getInstance().getLogger().warning(
-                        "Unable to apply the 0.25 legacy ender pearl size: "
+                        "Unable to apply the 0.23 legacy ender pearl size: "
                                 + exception.getClass().getSimpleName());
             }
         }
@@ -183,9 +184,16 @@ final class LegacyProjectileCollisionTracker {
             boolean alleyBot = candidate.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG);
             if (!candidate.equals(shooter) && !alleyBot && !projectile.canHitEntity(candidate)) continue;
 
-            BoundingBox targetBox = candidate instanceof Player
-                    ? LegacyHitboxes.projectileTarget(candidate)
-                    : candidate.getBoundingBox().clone().expand(LegacyHitboxes.PROJECTILE_EXPAND);
+            BoundingBox targetBox;
+            if (projectile instanceof EnderPearl) {
+                // Pearls keep their normal entity collision box. The 1.8 projectile
+                // expansion is retained for arrows, snowballs, potions and rods.
+                targetBox = candidate.getBoundingBox().clone();
+            } else {
+                targetBox = candidate instanceof Player
+                        ? LegacyHitboxes.projectileTarget(candidate)
+                        : candidate.getBoundingBox().clone().expand(LegacyHitboxes.PROJECTILE_EXPAND);
+            }
             double hitDistance;
             Vector hitPosition;
             if (targetBox.contains(start.getX(), start.getY(), start.getZ())) {

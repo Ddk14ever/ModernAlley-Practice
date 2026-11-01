@@ -16,6 +16,7 @@ import dev.revere.alley.feature.cooldown.CooldownType;
 import dev.revere.alley.feature.ffa.spawn.FFASpawnService;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingNoHungerImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingPearlCooldownImpl;
+import dev.revere.alley.feature.match.listener.MatchListener;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.EnderPearl;
@@ -53,6 +54,14 @@ public class FFAListener implements Listener {
             return;
         }
 
+        if (event.getItemDrop().getItemStack().getType() == Material.GLASS_BOTTLE) {
+            org.bukkit.entity.Item bottle = event.getItemDrop();
+            Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+                if (bottle.isValid()) bottle.remove();
+            });
+            return;
+        }
+
         ListenerUtil.clearDroppedItemsOnRegularItemDrop(event.getItemDrop());
     }
 
@@ -67,10 +76,7 @@ public class FFAListener implements Listener {
 
         ItemStack item = event.getItem();
         if (item.getType() == Material.POTION) {
-            AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-                player.getInventory().removeItem(new ItemStack(Material.GLASS_BOTTLE, 1));
-                player.updateInventory();
-            }, 1L);
+            MatchListener.scheduleGlassBottleCleanup(player, MatchListener.countGlassBottles(player));
         }
     }
 

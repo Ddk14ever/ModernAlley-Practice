@@ -92,6 +92,8 @@ public class FFAMatch extends Match {
 
     @Override
     public void handleRespawn(Player player) {
+        // Match deaths are synthetic, so the victim is normally alive here and this is
+        // a no-op. The guard only rescues a genuine death from an unhandled path.
         if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, false, true);
     }

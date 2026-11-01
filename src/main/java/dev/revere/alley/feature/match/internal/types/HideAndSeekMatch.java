@@ -580,9 +580,8 @@ public class HideAndSeekMatch extends DefaultMatch {
 
     @Override
     public void handleRespawn(Player player) {
-        // In party matches the lethal damage is cancelled and the player is kept at full
-        // health before handleDeath runs, so they may still be alive here — respawning an
-        // alive player sends an invalid respawn packet and kicks them with a protocol error.
+        // Match deaths are synthetic, so the victim is normally alive here and this is
+        // a no-op. The guard only rescues a genuine death from an unhandled path.
         if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, true, false);
         if (this.intermissionPhase || this.selectingRoles) {

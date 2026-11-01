@@ -201,15 +201,9 @@ public class LegacyCombatListener implements Listener {
         if (isSyntheticLegacyRodHit(e)) return;
         if (!isLegacyCritical(attacker)) return;
 
-        ItemStack weapon = attacker.getInventory().getItemInMainHand();
-        UUID attackerId = attacker.getUniqueId();
-        boolean composedByToolDamage = svc.hasSwordBlockKB(attackerId)
-                || ((svc.hasSwordBlockKB(attackerId) || svc.hasOldEnchants(attackerId))
-                && toolDamage(weapon.getType()) != null);
-        if (!composedByToolDamage && !hasVanillaCritical(attacker)) {
-            double damage = e.getDamage(EntityDamageEvent.DamageModifier.BASE) * 1.5;
-            e.setDamage(EntityDamageEvent.DamageModifier.BASE, Math.max(0.0, damage));
-        }
+        // onToolDamage already applies the 1.5x Legacy crit for this attacker: this
+        // handler only runs for oldSwordBlockKB players, so the old
+        // "composedByToolDamage" guard was always true and that block never executed.
         if (!isLegacyDamageSupplement(e)) {
             attacker.getWorld().spawnParticle(Particle.CRIT,
                     attacker.getLocation().add(0, 1, 0), 5, 0.2, 0.2, 0.2, 0);

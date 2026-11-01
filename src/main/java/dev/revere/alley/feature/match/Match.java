@@ -2096,8 +2096,9 @@ public abstract class Match {
         }
 
         if (player.isDead()) {
-            // Never send a cross-world teleport to a player who is still on the death
-            // screen — the client rejects the dimension change with a protocol error.
+            // Match deaths are synthetic, so this normally never runs. It only rescues
+            // a genuine death from an unhandled path; never teleport a dead player
+            // across worlds — the client rejects it with a protocol error.
             player.spigot().respawn();
         }
 

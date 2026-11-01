@@ -807,8 +807,8 @@ public class DefaultMatch extends Match {
 
     @Override
     public void handleRespawn(Player player) {
-        // Party matches keep the victim alive (damage is cancelled before handleDeath),
-        // so guard the respawn packet against alive players to avoid a protocol-error kick.
+        // Match deaths are synthetic, so the victim is normally alive here and this is
+        // a no-op. The guard only rescues a genuine death from an unhandled path.
         if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, false, true);
     }

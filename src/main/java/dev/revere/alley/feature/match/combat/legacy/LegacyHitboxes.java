@@ -16,8 +16,8 @@ public final class LegacyHitboxes {
     public static final double MELEE_EXPAND = 0.1D;
     /** Arrow, throwable and fishing-hook intercept expansion in 1.8. */
     public static final double PROJECTILE_EXPAND = 0.3D;
-    /** EntityThrowable#setSize in 1.8. */
-    public static final float PEARL_SIZE = 0.25F;
+    /** Legacy ender pearl entity size. */
+    public static final float PEARL_SIZE = 0.23F;
 
     private LegacyHitboxes() {
     }

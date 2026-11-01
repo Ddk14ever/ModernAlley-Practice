@@ -711,15 +711,30 @@ public class KnockbackListener implements Listener {
     /**
      * Keeps the Legacy horizontal motion inheritance while using FulfillSpigot's
      * fixed base vertical velocity. Sprint/enchantment and Punch vertical bonuses
-     * are applied later and may exceed this base limit.
+     * are applied later and may exceed this base limit. Only the component of the
+     * previous horizontal motion parallel to this hit's base direction is retained.
      */
     private Vector applyLegacyBaseMotion(Vector currentMotion, Vector impulse,
                                          KnockbackProfile profile, double verticalLimit) {
         double friction = profile.getLegacyHorizontalFriction();
+        double directionLengthSquared = impulse.getX() * impulse.getX()
+                + impulse.getZ() * impulse.getZ();
+        double inheritedX = 0.0D;
+        double inheritedZ = 0.0D;
+        if (directionLengthSquared > 1.0E-8D) {
+            double directionLength = Math.sqrt(directionLengthSquared);
+            double directionX = impulse.getX() / directionLength;
+            double directionZ = impulse.getZ() / directionLength;
+            double parallelMotion = currentMotion.getX() * directionX
+                    + currentMotion.getZ() * directionZ;
+            double inheritedMotion = parallelMotion / friction;
+            inheritedX = directionX * inheritedMotion;
+            inheritedZ = directionZ * inheritedMotion;
+        }
         return new Vector(
-                currentMotion.getX() / friction + impulse.getX(),
+                inheritedX + impulse.getX(),
                 Math.min(verticalLimit, impulse.getY()),
-                currentMotion.getZ() / friction + impulse.getZ());
+                inheritedZ + impulse.getZ());
     }
 
     private double applyLegacyDistanceReduction(KnockbackProfile profile,

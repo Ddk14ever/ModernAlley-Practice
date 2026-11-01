@@ -7,6 +7,7 @@ import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.feature.item.CustomItemType;
 import dev.revere.alley.feature.item.ItemService;
+import dev.revere.alley.feature.match.Match;
 import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
@@ -261,9 +262,10 @@ public final class CustomItemListener implements Listener {
                 return;
             }
             // SHEARS deliberately has no vanilla use state (no bow FOV or
-            // slowdown). Generic items send USE_ITEM while RMB is held; a
-            // short heartbeat timeout turns a click into a short burst and
-            // stops firing immediately after release.
+            // slowdown). Vanilla clients repeat the use packet every 4 ticks
+            // (Minecraft#rightClickMouse sets rightClickDelayTimer = 4, ~200 ms),
+            // so a 300 ms heartbeat keeps the weapon firing under normal jitter
+            // while a click still becomes a short burst and release stops quickly.
             if (System.nanoTime() - lastAkUseNanos.getOrDefault(id, 0L) > 300_000_000L) {
                 stopAutomaticFire(player);
                 return;
@@ -292,10 +294,14 @@ public final class CustomItemListener implements Listener {
             return;
         }
         items.setAmmo(weapon, ammo - 1);
+        // Write the stack back so the ammo component is guaranteed to persist even if
+        // the inventory getter returned a detached copy.
+        player.getInventory().setItemInMainHand(weapon);
         Location eye = player.getEyeLocation();
-        Vector direction = eye.getDirection().normalize();
+        Vector direction = applySpread(eye.getDirection().normalize(),
+                config().getDouble("ak47.spread", 0.0D));
         Location muzzle = eye.clone().add(direction.clone().multiply(0.55D));
-        spawnMuzzle(player, muzzle);
+        spawnMuzzle(player, muzzle, particle("ak47.muzzle-particle", Particle.SMOKE));
         player.getWorld().playSound(muzzle, Sound.ENTITY_ARROW_SHOOT, 0.75F, 1.65F);
         Snowball snowball = player.getWorld().spawn(muzzle, Snowball.class);
         snowball.setShooter(player);
@@ -313,12 +319,13 @@ public final class CustomItemListener implements Listener {
         snowball.setVelocity(direction.multiply(config().getDouble("ak47.projectile-speed", 3.0D)));
         snowball.setMetadata("alley_custom_ak",
                 new org.bukkit.metadata.FixedMetadataValue(AlleyPlugin.getInstance(), true));
+        Particle trail = particle("ak47.trail-particle", Particle.FLAME);
         Bukkit.getScheduler().runTaskTimer(AlleyPlugin.getInstance(), task -> {
             if (!snowball.isValid() || snowball.isDead() || !player.isOnline()) {
                 task.cancel();
                 return;
             }
-            snowball.getWorld().spawnParticle(Particle.FLAME, snowball.getLocation(), 1, 0, 0, 0, 0);
+            snowball.getWorld().spawnParticle(trail, snowball.getLocation(), 1, 0, 0, 0, 0);
         }, 1L, 1L);
         // A missed round should not leave a hidden projectile (and its trail
         // task) alive until the vanilla projectile timeout.
@@ -348,17 +355,20 @@ public final class CustomItemListener implements Listener {
             return;
         }
         items.setAmmo(weapon, ammo - 1);
+        player.getInventory().setItemInMainHand(weapon);
         this.awpCooldownUntil.put(player.getUniqueId(),
                 System.currentTimeMillis() + awpShotCooldownMillis());
         Location eye = player.getEyeLocation();
         Vector direction = eye.getDirection().normalize();
         player.getWorld().playSound(eye, Sound.ENTITY_GENERIC_EXPLODE, 0.65F, 1.8F);
-        spawnMuzzle(player, eye.clone().add(direction.clone().multiply(0.55D)));
+        spawnMuzzle(player, eye.clone().add(direction.clone().multiply(0.55D)),
+                particle("awp.muzzle-particle", Particle.SMOKE));
         double range = config().getDouble("awp.range", 100.0D);
         RayTraceResult block = player.getWorld().rayTraceBlocks(eye, direction, range);
         double limit = block == null ? range : eye.toVector().distance(block.getHitPosition());
         RayTraceResult hit = player.getWorld().rayTraceEntities(eye, direction, limit, 0.1D,
-                entity -> entity != player && entity instanceof LivingEntity && entity.isValid());
+                entity -> entity != player && entity instanceof LivingEntity && entity.isValid()
+                        && !isSameTeam(player, entity));
         if (hit != null && hit.getHitEntity() != null) {
             if (hit.getHitEntity() instanceof LivingEntity living) {
                 applyWeaponDamage(living, Math.max(0.0D, config().getDouble("awp.damage", 16.0D)), player);
@@ -366,6 +376,23 @@ public final class CustomItemListener implements Listener {
                 player.getWorld().spawnParticle(Particle.CRIT, hitLocation, 8, 0.15, 0.15, 0.15, 0);
             }
         }
+    }
+
+    /**
+     * Applies a Gaussian cone of the configured spread around the aim direction.
+     * The AK-47 config exposes {@code ak47.spread}; it was previously ignored.
+     */
+    private Vector applySpread(Vector direction, double spread) {
+        if (spread <= 0.0D) return direction;
+        Vector right = direction.clone().crossProduct(new Vector(0.0D, 1.0D, 0.0D));
+        if (right.lengthSquared() < 1.0E-8D) right = new Vector(1.0D, 0.0D, 0.0D);
+        right.normalize();
+        Vector up = right.clone().crossProduct(direction).normalize();
+        java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+        return direction.clone()
+                .add(right.multiply(random.nextGaussian() * spread))
+                .add(up.multiply(random.nextGaussian() * spread))
+                .normalize();
     }
 
     private void applyWeaponDamage(LivingEntity victim, double damage, Player attacker) {
@@ -640,6 +667,19 @@ public final class CustomItemListener implements Listener {
         UUID id = player.getUniqueId();
         boolean holding = items.getCustomItemType(player.getInventory().getItemInMainHand()) == CustomItemType.AWP;
         if (!holding) {
+            // The scope state must not survive an inventory reset (death, match end,
+            // loadout swap): otherwise the next AWP would apply scoped Slowness II
+            // and keep a stale pumpkin-helmet backup. Only restore the saved helmet
+            // when the scope pumpkin is still worn, so a later match's armour is safe.
+            if (this.scoped.remove(id)) {
+                ItemStack backup = this.scopedHelmet.remove(id);
+                ItemStack helmet = player.getInventory().getHelmet();
+                if (helmet != null && helmet.getType() == Material.CARVED_PUMPKIN) {
+                    player.getInventory().setHelmet(backup == null
+                            ? new ItemStack(Material.AIR) : backup);
+                }
+                setScopeFov(player, false);
+            }
             if (awpSlowed.remove(id)) {
                 player.removePotionEffect(PotionEffectType.SLOWNESS);
                 PotionEffect previous = displacedSlowness.remove(id);
@@ -780,8 +820,19 @@ public final class CustomItemListener implements Listener {
         }
     }
 
-    private void spawnMuzzle(Player player, Location location) {
-        player.getWorld().spawnParticle(Particle.SMOKE, location, 3, 0.04, 0.04, 0.04, 0.01);
+    private void spawnMuzzle(Player player, Location location, Particle particle) {
+        player.getWorld().spawnParticle(particle, location, 3, 0.04, 0.04, 0.04, 0.01);
+    }
+
+    /** Reads a particle name from config, falling back when it is missing or invalid. */
+    private Particle particle(String key, Particle fallback) {
+        String raw = config().getString(key);
+        if (raw == null) return fallback;
+        try {
+            return Particle.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return fallback;
+        }
     }
 
     private org.bukkit.configuration.file.FileConfiguration config() {
@@ -792,5 +843,20 @@ public final class CustomItemListener implements Listener {
         Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
                 .getProfile(player.getUniqueId());
         return profile != null && (profile.getMatch() != null || profile.getFfaMatch() != null);
+    }
+
+    /**
+     * The AWP is a hitscan weapon, so friendly combatants must be excluded here.
+     * Bukkit damage protection alone is too late: the bullet would stop on a
+     * teammate and never reach the enemy behind them.
+     */
+    private boolean isSameTeam(Player shooter, Entity target) {
+        if (!(target instanceof Player other)) return false;
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfile(shooter.getUniqueId());
+        Match match = profile == null ? null : profile.getMatch();
+        if (match == null) return false;
+        if (match.getParticipant(shooter) == null || match.getParticipant(other) == null) return false;
+        return match.isInSameTeam(shooter, other);
     }
 }

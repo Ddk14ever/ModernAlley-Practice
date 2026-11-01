@@ -17,11 +17,11 @@ ak47:
     - "&8Use the off-hand swap key as reload."
   magazine-size: 30
   shots-per-second: 10.0
-  damage: 12.0
+  damage: 10.0
   projectile-speed: 3.0
-  spread: 0.015
-  reload-ticks: 40
-  switch-ticks: 24
+  spread: 0.03
+  reload-ticks: 36
+  switch-ticks: 20
   attack-speed: 0.833333
   trail-particle: FLAME
   muzzle-particle: SMOKE
@@ -41,9 +41,10 @@ awp:
     - "&8Left-click to fire one shot (scoped or unscoped)."
   magazine-size: 5
   damage: 30.0
+  # Unused: the AWP is hitscan (ray-traced), so projectile speed does not apply.
   projectile-speed: 8.0
-  reload-ticks: 60
-  switch-ticks: 24
+  reload-ticks: 50
+  switch-ticks: 20
   shot-cooldown-ticks: 24
   attack-speed: 0.833333
   # Retained for configuration compatibility. Scope visual/movement behavior
@@ -54,13 +55,13 @@ grappling-hook:
   # Uses the vanilla fishing-rod model. The persistent id makes only this rod
   # use the grappling behavior; normal fishing rods remain unchanged.
   material: FISHING_ROD
-  name: "&b&l抓钩"
+  name: "&b&lHook"
   lore:
     - "&8右键抛出钩子。"
     - "&8再次右键收回并向钩子方向加速。"
   # Final speed = base-speed + hook-distance * distance-speed.
-  base-speed: 3.0
-  distance-speed: 5.0
-  max-speed: 10.0
+  base-speed: 0.5
+  distance-speed: 1.0
+  max-speed: 3.0
   min-distance: 4.0
   max-lifetime-ticks: 200
