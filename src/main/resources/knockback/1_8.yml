@@ -43,6 +43,9 @@ projectile:
   vertical: 0.2
   horizontal_multiplier: 0.9
   vertical_multiplier: 0.9
+# 1.8 melee geometry: standing 0.6 x 1.8 box expanded by 0.1
+# (Entity#getCollisionBorderSize). Do not inflate these values; legacy melee
+# reads them through LegacyHitboxes, and the modern path would widen too.
 hitbox:
   length: 0.6
   height: 1.8
@@ -67,6 +70,16 @@ packet:
   delay:
     enabled: false
     ticks: 2
+melee:
+  # Server-side re-attack when the client resolved a hit but no damage event
+  # reached the server (anti-whiff). This is an Alley addition, not vanilla
+  # 1.8. When enabled the retry is still re-validated against the 3.0 reach
+  # and block occlusion. Set false for strictly vanilla 1.8 melee.
+  anti_whiff: false
 modern:
   cooldown_affects_kb: false
+  # Legacy melee reach, measured as eye -> hitbox intersection and hard-capped
+  # at 3.0, matching EntityRenderer#getMouseOver in 1.8. The +0.1 collision
+  # border is part of the box, NOT added on top of this cap, so lowering this
+  # to 2.9 would make hits SHORTER than 1.8 rather than equal to it.
   entity_interaction_range: 3.0

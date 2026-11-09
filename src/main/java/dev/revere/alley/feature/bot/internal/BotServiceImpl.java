@@ -57,6 +57,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Service(provides = BotService.class, priority = 230)
 public class BotServiceImpl implements BotService {
+    private static final String[] BOT_HUMANIZATION_KEYS = {
+            "click-jitter", "misclick-chance", "aim-smoothing",
+            "switch-delay-ticks", "crit-chance", "blockhit-rate"
+    };
     private final Map<String, BotDifficultyProfile> profiles = new LinkedHashMap<>();
     private final Map<UUID, BotMatchSession> playerSessions = new ConcurrentHashMap<>();
     private final Map<UUID, BotMatchSession> entitySessions = new ConcurrentHashMap<>();
@@ -64,6 +68,8 @@ public class BotServiceImpl implements BotService {
     private final Set<UUID> pendingStarts = ConcurrentHashMap.newKeySet();
     private final Map<String, CompletableFuture<PlayerProfile>> skinProfiles = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> customSaveTasks = new ConcurrentHashMap<>();
+    /** Bot rematches requested by Play Again while the previous session is ending. */
+    private final Map<UUID, PendingRematch> pendingRematches = new ConcurrentHashMap<>();
     private PacketAdapter inventoryPacketListener;
 
     @Override
@@ -88,6 +94,7 @@ public class BotServiceImpl implements BotService {
         entitySessions.clear();
         openInventories.clear();
         pendingStarts.clear();
+        pendingRematches.clear();
         skinProfiles.clear();
         customSaveTasks.values().forEach(BukkitTask::cancel);
         customSaveTasks.clear();
@@ -162,6 +169,22 @@ public class BotServiceImpl implements BotService {
                     config.set("profiles." + id + "." + key, source.get(key));
                 }
                 migrated = true;
+            }
+        }
+        // Existing server copies were created before the humanization keys existed.
+        // Materialize those defaults once so they are visible and editable on disk,
+        // instead of only living in the resource defaults.
+        if (defaultSection != null && section != null) {
+            for (String id : defaultSection.getKeys(false)) {
+                ConfigurationSection target = section.getConfigurationSection(id);
+                ConfigurationSection source = defaultSection.getConfigurationSection(id);
+                if (target == null || source == null) continue;
+                for (String key : BOT_HUMANIZATION_KEYS) {
+                    if (!target.isSet(key) && source.isSet(key)) {
+                        config.set("profiles." + id + "." + key, source.get(key));
+                        migrated = true;
+                    }
+                }
             }
         }
         if (migrated) {
@@ -384,6 +407,28 @@ public class BotServiceImpl implements BotService {
         playerSessions.remove(session.getPlayerId(), session);
         if (session.getBotId() != null) entitySessions.remove(session.getBotId(), session);
         openInventories.remove(session.getPlayerId());
+
+        PendingRematch rematch = pendingRematches.remove(session.getPlayerId());
+        if (rematch == null || !session.getKit().equals(rematch.kit())) return;
+        Player player = Bukkit.getPlayer(session.getPlayerId());
+        if (player == null || !player.isOnline()) return;
+        // The old session's cleanup just finished; start the rematch next tick so
+        // the arena/teleport work from this tick cannot interleave with spawning.
+        Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(),
+                () -> startMatch(player, rematch.kit(), rematch.difficultyId()));
+    }
+
+    /**
+     * Queues a Bot rematch for when the player is still inside the ending session.
+     * Clicking Play Again happens before the delayed return-to-lobby, so a direct
+     * start would be rejected by the "already in a session" guard.
+     */
+    public void scheduleRematch(Player player, Kit kit, String difficultyId) {
+        if (player == null || kit == null || difficultyId == null || difficultyId.isBlank()) return;
+        pendingRematches.put(player.getUniqueId(), new PendingRematch(kit, difficultyId));
+    }
+
+    private record PendingRematch(Kit kit, String difficultyId) {
     }
 
     public boolean isInventoryOpen(Player player) {

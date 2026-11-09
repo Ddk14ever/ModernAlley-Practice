@@ -28,7 +28,14 @@ public class BotDifficultyButton extends Button {
                         "&7Attack Reach: &f" + profile.getMinReach() + " - " + profile.getMaxReach(),
                         "&7Combat Distance: &f" + profile.getCombatDistance(),
                         "&7Movement Speed: &f" + profile.getMovementSpeed(),
-                        "&7Reaction: &f" + profile.getReactionTicks() + " ticks",
+                        "&7Ping / Latency: &f" + profile.getPing() + "ms / "
+                                + profile.getLatencyTicks() + "t",
+                        "&7Click Jitter / Misclick: &f" + percent(profile.getClickJitter())
+                                + " / " + percent(profile.getMisclickChance()),
+                        "&7Aim Smoothing / Switch: &f" + percent(profile.getAimSmoothing())
+                                + " / " + profile.getSwitchDelayTicks() + "t",
+                        "&7Crit / BlockHit Rate: &f" + percent(profile.getCritChance())
+                                + " / " + percent(profile.getBlockHitRate()),
                         "&7Aim Error: &f" + profile.getAimError(),
                         "&7W-Tap: " + (profile.isWTap() ? "&aYes" : "&cNo"),
                         "&7Strafe: " + (profile.isStrafe() ? "&aYes" : "&cNo"),
@@ -56,5 +63,9 @@ public class BotDifficultyButton extends Button {
 
     private String yesNo(boolean enabled) {
         return enabled ? "Yes" : "No";
+    }
+
+    private String percent(double value) {
+        return Math.round(value * 100.0D) + "%";
     }
 }

@@ -29,4 +29,23 @@ public class PlayAgainCommand extends BaseCommand {
         PlayAgainListener.queueForPlayAgain(player,
                 command.length() == 0 ? null : command.getArgs(0));
     }
+
+    /** Target for the play-again link of a Bot duel: restarts the same Bot. */
+    @CommandData(name = "playagainbot",
+            usage = "playagainbot <kit> <difficulty>",
+            description = "Start another Bot duel with the same kit and difficulty.")
+    public void onBotRematch(CommandArgs command) {
+        Player player = command.getPlayer();
+        if (command.length() < 2) {
+            player.sendMessage(dev.revere.alley.common.text.CC.translate("&cUsage: /playagainbot <kit> <difficulty>"));
+            return;
+        }
+        dev.revere.alley.feature.kit.Kit kit = this.plugin.getService(KitService.class)
+                .getKit(command.getArgs(0));
+        if (kit == null) {
+            player.sendMessage(dev.revere.alley.common.text.CC.translate("&cThat kit no longer exists."));
+            return;
+        }
+        PlayAgainListener.queueForBotRematch(player, kit, command.getArgs(1));
+    }
 }

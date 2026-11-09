@@ -43,14 +43,14 @@ public final class CustomBotMenu extends Menu {
         CustomBotProfile custom = customProfile(player);
         Map<Integer, Button> buttons = new HashMap<>();
         int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25,
-                28, 29, 30, 31, 32, 33, 34};
+                28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
         Setting[] settings = Setting.values();
         for (int index = 0; index < settings.length; index++) {
             buttons.put(slots[index], new SettingButton(custom, settings[index]));
         }
-        buttons.put(37, new TextButton(this.kit, custom, true));
-        buttons.put(39, new TextButton(this.kit, custom, false));
-        buttons.put(41, new StartButton(this.kit, custom));
+        buttons.put(46, new TextButton(this.kit, custom, true));
+        buttons.put(48, new TextButton(this.kit, custom, false));
+        buttons.put(50, new StartButton(this.kit, custom));
         buttons.put(45, new BackButton(new BotDifficultyMenu(this.kit)));
         addBorder(buttons, Material.BLACK_STAINED_GLASS_PANE, 6);
         return buttons;
@@ -183,7 +183,13 @@ public final class CustomBotMenu extends Menu {
         ANTI_FIRE(Material.WATER_BUCKET, "Anti-Fire", 1.0D, 0.0D, 1.0D, true),
         W_TAP_RATE(Material.REDSTONE, "W-Tap Rate", 0.05D, 0.0D, 1.0D, false),
         W_TAP_REACTION_TIME(Material.REPEATER, "W-Tap Reaction Time", 10.0D, 0.0D, 1000.0D, false),
-        BLOCK_HIT(Material.SHIELD, "BlockHit", 1.0D, 0.0D, 1.0D, true);
+        BLOCK_HIT(Material.SHIELD, "BlockHit", 1.0D, 0.0D, 1.0D, true),
+        CLICK_JITTER(Material.LEVER, "Click Jitter", 0.05D, 0.0D, 0.5D, false),
+        MISCLICK_CHANCE(Material.FLINT, "Misclick Chance", 0.01D, 0.0D, 0.25D, false),
+        AIM_SMOOTHING(Material.ENDER_EYE, "Aim Smoothing", 0.05D, 0.0D, 0.95D, false),
+        SWITCH_DELAY(Material.HOPPER, "Switch Delay", 1.0D, 0.0D, 10.0D, false),
+        CRIT_CHANCE(Material.DIAMOND_AXE, "Crit Chance", 0.05D, 0.0D, 1.0D, false),
+        BLOCKHIT_RATE(Material.IRON_DOOR, "BlockHit Rate", 0.05D, 0.0D, 1.0D, false);
 
         private final Material icon;
         private final String displayName;
@@ -204,8 +210,14 @@ public final class CustomBotMenu extends Menu {
 
         private String display(CustomBotProfile custom) {
             if (this.toggle) return value(custom) > 0.0D ? "Enabled" : "Disabled";
-            if (this == W_TAP_RATE) return Math.round(value(custom) * 100.0D) + "%";
-            if (this == W_TAP_REACTION_TIME) return (int) value(custom) + " ms";
+            if (this == W_TAP_RATE || this == CLICK_JITTER || this == MISCLICK_CHANCE
+                    || this == AIM_SMOOTHING || this == CRIT_CHANCE || this == BLOCKHIT_RATE) {
+                return Math.round(value(custom) * 100.0D) + "%";
+            }
+            if (this == W_TAP_REACTION_TIME || this == PING) {
+                return (int) value(custom) + " ms";
+            }
+            if (this == SWITCH_DELAY) return (int) value(custom) + " ticks";
             return BigDecimal.valueOf(value(custom)).setScale(2, RoundingMode.HALF_UP)
                     .stripTrailingZeros().toPlainString();
         }
@@ -242,6 +254,12 @@ public final class CustomBotMenu extends Menu {
                 case W_TAP_RATE -> custom.getWTapRate();
                 case W_TAP_REACTION_TIME -> custom.getWTapReactionTimeMs();
                 case BLOCK_HIT -> custom.isBlockHit() ? 1.0D : 0.0D;
+                case CLICK_JITTER -> custom.getClickJitter();
+                case MISCLICK_CHANCE -> custom.getMisclickChance();
+                case AIM_SMOOTHING -> custom.getAimSmoothing();
+                case SWITCH_DELAY -> custom.getSwitchDelayTicks();
+                case CRIT_CHANCE -> custom.getCritChance();
+                case BLOCKHIT_RATE -> custom.getBlockHitRate();
             };
         }
 
@@ -267,6 +285,12 @@ public final class CustomBotMenu extends Menu {
                 case W_TAP_RATE -> custom.setWTapRate(value);
                 case W_TAP_REACTION_TIME -> custom.setWTapReactionTimeMs((int) value);
                 case BLOCK_HIT -> custom.setBlockHit(value > 0.0D);
+                case CLICK_JITTER -> custom.setClickJitter(value);
+                case MISCLICK_CHANCE -> custom.setMisclickChance(value);
+                case AIM_SMOOTHING -> custom.setAimSmoothing(value);
+                case SWITCH_DELAY -> custom.setSwitchDelayTicks((int) value);
+                case CRIT_CHANCE -> custom.setCritChance(value);
+                case BLOCKHIT_RATE -> custom.setBlockHitRate(value);
             }
         }
     }

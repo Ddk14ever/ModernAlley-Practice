@@ -19,7 +19,9 @@ import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.arena.ArenaService;
 import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
+import dev.revere.alley.feature.bot.BotAiMode;
 import dev.revere.alley.feature.bot.BotService;
+import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.challenge.ChallengeService;
 import dev.revere.alley.feature.challenge.ChallengeType;
@@ -130,6 +132,9 @@ public abstract class Match {
     private MatchState state;
     private long startTime;
     private long endTime;
+
+    /** Bot difficulty id for a Bot duel, captured while the session still exists. */
+    private String botDifficultyId;
 
     /**
      * Constructor for the AbstractMatch class.
@@ -544,8 +549,10 @@ public abstract class Match {
         HotbarService hotbarService = this.plugin.getService(HotbarService.class);
         visibilityService.updateVisibility(player);
         // Bot sessions are removed during match cleanup, before this delayed
-        // lobby task executes. Capture the state while the session still exists.
+        // lobby task executes. Capture the state (including the difficulty id
+        // needed to rebuild a Bot rematch paper) while the session still exists.
         final boolean botMatch = this.plugin.getService(BotService.class).getSession(player) != null;
+        final String botDifficultyId = this.getBotDifficultyId();
 
         // Resume lobby music only after the player is back at the lobby spawn.
         org.bukkit.Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
@@ -572,10 +579,11 @@ public abstract class Match {
                 // 结果阶段发的纸（0/1格）已被大厅hotbar取代。若玩家返回前没有点击"再来一局"
                 // （未入队），将纸补发到第4格（3）。有pending"再来一局"请求的玩家（入队操作
                 // 在下一tick执行）不得补发。
-                if (!botMatch && currentParty == null
+                // Bot matches get the same top-up, but with the rematch paper.
+                if ((!botMatch || botDifficultyId != null) && currentParty == null
                         && currentProfile.getQueueProfile() == null
                         && !PlayAgainListener.isPlayAgainPending(player)) {
-                    player.getInventory().setItem(3, createPlayAgainItem());
+                    player.getInventory().setItem(3, createPlayAgainItem(botDifficultyId));
                 }
             } catch (Exception ignored) {}
         }, 50L);
@@ -638,7 +646,46 @@ public abstract class Match {
     }
 
     protected org.bukkit.inventory.ItemStack createPlayAgainItem() {
-        return dev.revere.alley.feature.match.utility.MatchUtility.createPlayAgainItem(this.getKit());
+        return createPlayAgainItem(this.getBotDifficultyId());
+    }
+
+    /**
+     * Builds the paper from an already captured Bot difficulty id. The delayed
+     * lobby top-up runs after the Bot session is gone, so it must not look the
+     * difficulty up again.
+     */
+    protected org.bukkit.inventory.ItemStack createPlayAgainItem(String botDifficultyId) {
+        return dev.revere.alley.feature.match.utility.MatchUtility.createPlayAgainItem(
+                this.getKit(), botDifficultyId);
+    }
+
+    /**
+     * Returns the Bot difficulty id when this match is a Bot duel, otherwise null.
+     * Used to build a Play Again paper that restarts the same Bot instead of queueing.
+     */
+    public String getBotDifficultyId() {
+        // Cache it: the delayed lobby task runs after the Bot NPC has been removed,
+        // so a live lookup would return null right when the paper is handed out.
+        if (this.botDifficultyId != null) return this.botDifficultyId;
+
+        BotService botService = this.plugin.getService(BotService.class);
+        if (botService == null) return null;
+        for (GameParticipant<MatchGamePlayer> participant : this.getParticipants()) {
+            for (MatchGamePlayer gamePlayer : participant.getAllPlayers()) {
+                Player player = gamePlayer.getTeamPlayer();
+                if (player == null) continue;
+                BotMatchSession session = botService.getSession(player);
+                if (session == null || session.getDifficulty() == null) continue;
+                // Only the computer side identifies the Bot duel; the human also has
+                // a session, but getDifficulty() there would return the same value.
+                if (session.getBotId() != null
+                        && session.getBotId().equals(player.getUniqueId())) {
+                    this.botDifficultyId = session.getDifficulty().getId();
+                    return this.botDifficultyId;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -1340,7 +1387,20 @@ public abstract class Match {
 
         // Highest CPS uses the real-time session max (reset at match start); average combat CPS
         // has been removed.
-        snapshot.setHighestCombatCps(dev.revere.alley.feature.cps.CPSListener.getCpsManager().getMaxCPS(player.getUniqueId()));
+        int highestCombatCps = dev.revere.alley.feature.cps.CPSListener.getCpsManager()
+                .getMaxCPS(player.getUniqueId());
+        // A native Bot has no client, so its ARM_ANIMATION packets never reach
+        // CPSManager and the session max stays 0. Use the CPS configured for
+        // that Bot (the value its click cadence is built from) instead.
+        BotService botService = this.plugin.getService(BotService.class);
+        BotMatchSession session = botService == null ? null : botService.getSession(player);
+        if (session != null
+                && session.getAiMode() != BotAiMode.GOMOKU
+                && player.getUniqueId().equals(session.getBotId())) {
+            highestCombatCps = Math.max(highestCombatCps,
+                    (int) Math.round(session.getDifficulty().getCps()));
+        }
+        snapshot.setHighestCombatCps(highestCombatCps);
 
         this.snapshots.add(snapshot);
     }

@@ -18,6 +18,7 @@ import dev.revere.alley.core.profile.progress.PlayerProgress;
 import dev.revere.alley.core.profile.progress.ProgressService;
 import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.bot.BotService;
+import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.challenge.ChallengeService;
 import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.layout.LayoutService;
@@ -261,30 +262,35 @@ public class DefaultMatch extends Match {
     }
 
     private void givePlayAgainPapers(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
-        if (this.getQueue() == null || this.getKit() == null) return;
+        if (this.getKit() == null) return;
 
-        // Bot matches never hand out the Play Again paper — the human player returns
-        // straight to the lobby without a requeue shortcut.
-        // Bot对局不发放"再来一局"纸——玩家结束对局后直接返回大厅，无快捷重排。
-        boolean botMatch = this.getParticipants().stream()
-                .flatMap(participant -> participant.getAllPlayers().stream())
-                .map(MatchGamePlayer::getTeamPlayer)
-                .filter(Objects::nonNull)
-                .anyMatch(teamPlayer -> AlleyPlugin.getInstance()
-                        .getService(BotService.class).getSession(teamPlayer) != null);
-        if (botMatch) return;
+        // Bot matches hand out the same paper, but it restarts the same Bot duel
+        // (same kit + difficulty) instead of queueing for an unranked match, so
+        // the paper does not depend on a queue being available.
+        // Bot对局也发放"再来一局"纸，但点击后用相同套件与难度重开Bot对局，而不是排位匹配。
+        boolean botMatch = this.getBotDifficultyId() != null;
+        if (!botMatch && this.getQueue() == null) return;
 
         org.bukkit.inventory.ItemStack paper = this.createPlayAgainItem();
+        if (paper == null) return;
 
         Player winnerPlayer = winner.getLeader().getTeamPlayer();
-        if (winnerPlayer != null && winnerPlayer.isOnline()) {
+        if (isHumanParticipant(winnerPlayer)) {
             winnerPlayer.getInventory().setItem(1, paper.clone());
         }
 
         Player loserPlayer = loser.getLeader().getTeamPlayer();
-        if (loserPlayer != null && loserPlayer.isOnline()) {
+        if (isHumanParticipant(loserPlayer)) {
             loserPlayer.getInventory().setItem(0, paper.clone());
         }
+    }
+
+    /** Real players only: the Bot NPC is also a Player and must not receive items. */
+    private boolean isHumanParticipant(Player target) {
+        if (target == null || !target.isOnline()) return false;
+        BotMatchSession session = AlleyPlugin.getInstance().getService(BotService.class)
+                .getSession((org.bukkit.entity.Entity) target);
+        return session == null || !target.getUniqueId().equals(session.getBotId());
     }
 
     /**

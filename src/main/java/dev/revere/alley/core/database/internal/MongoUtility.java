@@ -318,6 +318,12 @@ public class MongoUtility {
                 .put("lavaTicks", custom.getLavaTicks())
                 .put("antiFire", custom.isAntiFire())
                 .put("healHealth", custom.getHealHealth())
+                .put("clickJitter", custom.getClickJitter())
+                .put("misclickChance", custom.getMisclickChance())
+                .put("aimSmoothing", custom.getAimSmoothing())
+                .put("switchDelayTicks", custom.getSwitchDelayTicks())
+                .put("critChance", custom.getCritChance())
+                .put("blockHitRate", custom.getBlockHitRate())
                 .build();
     }
 
@@ -347,6 +353,12 @@ public class MongoUtility {
         custom.setLavaTicks(document.getInteger("lavaTicks", custom.getLavaTicks()));
         custom.setAntiFire(document.getBoolean("antiFire", custom.isAntiFire()));
         custom.setHealHealth(readDouble(document, "healHealth", custom.getHealHealth()));
+        custom.setClickJitter(readDouble(document, "clickJitter", custom.getClickJitter()));
+        custom.setMisclickChance(readDouble(document, "misclickChance", custom.getMisclickChance()));
+        custom.setAimSmoothing(readDouble(document, "aimSmoothing", custom.getAimSmoothing()));
+        custom.setSwitchDelayTicks(document.getInteger("switchDelayTicks", custom.getSwitchDelayTicks()));
+        custom.setCritChance(readDouble(document, "critChance", custom.getCritChance()));
+        custom.setBlockHitRate(readDouble(document, "blockHitRate", custom.getBlockHitRate()));
         return custom;
     }
 

@@ -23,6 +23,10 @@ profiles:
   # tryhard: false stops combat against a disengaged opponent, but permits eating and drinking.
   # w-tap-rate is a probability: 0.65 means 65%; reaction time is milliseconds.
   # blockhit applies only in oldSwordBlockKB kits.
+  # ping drives one-way latency for attacks, melee perception and legacy hit reactions.
+  # click-jitter / misclick-chance / aim-smoothing shape the click and aim model.
+  # switch-delay-ticks blocks attacks briefly after a hotbar switch.
+  # crit-chance / blockhit-rate are legacy-only and are rolled per opportunity.
   easy:
     display-name: "&aEasy"
     icon: WOODEN_SWORD
@@ -34,7 +38,13 @@ profiles:
     movement-speed: 1.0
     aim-speed: 12.0
     aim-error: 0.32
-    ping: 0
+    ping: 150
+    click-jitter: 0.25
+    misclick-chance: 0.10
+    aim-smoothing: 0.45
+    switch-delay-ticks: 2
+    crit-chance: 0.45
+    blockhit-rate: 0.05
     tryhard: false
     w-tap: false
     w-tap-rate: 0.65
@@ -58,7 +68,13 @@ profiles:
     movement-speed: 1.0
     aim-speed: 18.0
     aim-error: 0.24
-    ping: 0
+    ping: 100
+    click-jitter: 0.20
+    misclick-chance: 0.06
+    aim-smoothing: 0.60
+    switch-delay-ticks: 1
+    crit-chance: 0.65
+    blockhit-rate: 0.12
     tryhard: false
     w-tap: true
     w-tap-rate: 0.65
@@ -82,7 +98,13 @@ profiles:
     movement-speed: 1.0
     aim-speed: 32.0
     aim-error: 0.16
-    ping: 0
+    ping: 60
+    click-jitter: 0.15
+    misclick-chance: 0.03
+    aim-smoothing: 0.70
+    switch-delay-ticks: 1
+    crit-chance: 0.80
+    blockhit-rate: 0.18
     tryhard: true
     w-tap: true
     w-tap-rate: 0.65
@@ -106,7 +128,13 @@ profiles:
     movement-speed: 1.35
     aim-speed: 180.0
     aim-error: 0.0
-    ping: 0
+    ping: 25
+    click-jitter: 0.08
+    misclick-chance: 0.01
+    aim-smoothing: 0.80
+    switch-delay-ticks: 1
+    crit-chance: 0.95
+    blockhit-rate: 0.25
     tryhard: true
     w-tap: true
     w-tap-rate: 0.65

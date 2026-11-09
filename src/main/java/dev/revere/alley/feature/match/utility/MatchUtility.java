@@ -216,19 +216,40 @@ public class MatchUtility {
      * 返回大厅补发（第4格）共用。
      */
     public ItemStack createPlayAgainItem(Kit kit) {
+        return createPlayAgainItem(kit, null);
+    }
+
+    /**
+     * Builds the Play Again paper. A non-null bot difficulty marks the paper as a
+     * Bot rematch: right-clicking it starts another Bot duel with the same kit and
+     * difficulty instead of queueing for an unranked match.
+     */
+    public ItemStack createPlayAgainItem(Kit kit, String botDifficultyId) {
         if (kit == null) return null;
 
         ItemStack paper = new ItemStack(Material.PAPER);
         ItemMeta meta = paper.getItemMeta();
         meta.setDisplayName(CC.translate("&6&lPlay Again"));
         List<String> lore = new ArrayList<>();
-        lore.add(CC.translate("&7Right-click to join the same queue again."));
+        boolean botRematch = botDifficultyId != null && !botDifficultyId.isBlank();
+        lore.add(CC.translate(botRematch
+                ? "&7Right-click to fight the same Bot again."
+                : "&7Right-click to join the same queue again."));
         lore.add(CC.translate("&7Kit: &f" + kit.getDisplayName()));
+        if (botRematch) {
+            lore.add(CC.translate("&7Bot: &f" + botDifficultyId));
+        }
         meta.setLore(lore);
         meta.getPersistentDataContainer().set(
                 new NamespacedKey(plugin, PlayAgainListener.KIT_KEY),
                 PersistentDataType.STRING,
                 kit.getName());
+        if (botRematch) {
+            meta.getPersistentDataContainer().set(
+                    new NamespacedKey(plugin, PlayAgainListener.BOT_KEY),
+                    PersistentDataType.STRING,
+                    botDifficultyId);
+        }
         paper.setItemMeta(meta);
         return paper;
     }
@@ -238,16 +259,28 @@ public class MatchUtility {
      * Only normal unranked solo queues can be rejoined through this action.
      */
     public void sendPlayAgain(Match match) {
-        if (match == null || match.getKit() == null || match.getQueue() == null
-                || match.getQueue().isRanked() || match.getQueue().isDuos()) {
-            return;
+        if (match == null || match.getKit() == null) return;
+
+        String botDifficulty = match.getBotDifficultyId();
+        String command;
+        String hover;
+        if (botDifficulty != null) {
+            // Bot duel: the link restarts the same Bot instead of queueing.
+            command = "/playagainbot " + match.getKit().getName() + " " + botDifficulty;
+            hover = "&eClick to fight the same &6" + match.getKit().getDisplayName() + "&e Bot again.";
+        } else {
+            if (match.getQueue() == null || match.getQueue().isRanked() || match.getQueue().isDuos()) {
+                return;
+            }
+            command = "/playagain " + match.getKit().getName();
+            hover = "&eClick to queue for &6" + match.getKit().getDisplayName() + "&e again.";
         }
 
         TextComponent line = new TextComponent("");
         line.addExtra(ClickableUtil.createComponent(
                 "&a&l(Play Again)",
-                "/playagain " + match.getKit().getName(),
-                "&eClick to queue for &6" + match.getKit().getDisplayName() + "&e again."
+                command,
+                hover
         ));
 
         ProfileService profileService = plugin.getService(ProfileService.class);

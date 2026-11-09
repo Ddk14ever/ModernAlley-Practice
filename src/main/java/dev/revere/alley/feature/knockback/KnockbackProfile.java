@@ -52,6 +52,7 @@ public class KnockbackProfile {
     private boolean packetDelayEnabled;
     private int packetDelayTicks;
     private double hitboxLength, hitboxHeight;
+    private boolean meleeAntiWhiff;
 
     public KnockbackProfile(String name, FileConfiguration config) {
         this.name = name;
@@ -126,6 +127,9 @@ public class KnockbackProfile {
         packetDelayTicks = config.getInt("packet.delay.ticks", 2);
         hitboxLength = config.getDouble("hitbox.length", 0.6);
         hitboxHeight = config.getDouble("hitbox.height", 1.8);
+        // Server-side re-attack when the client resolved a hit but the damage
+        // event never reached the server. Not a vanilla 1.8 behaviour.
+        meleeAntiWhiff = config.getBoolean("melee.anti_whiff", true);
     }
 
     private static double positiveOrDefault(double value, double fallback) {

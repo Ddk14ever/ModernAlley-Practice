@@ -70,6 +70,11 @@ public class PlayerKnockbackData {
         return velocity;
     }
 
+    /** Same captured slot, named for what it is: a vector seen on the velocity event. */
+    public Vector consumeCapturedKnockback() {
+        return consumeServerControlledVelocity();
+    }
+
     public long getPendingNativeProjectileVelocityTick() { return pendingNativeProjectileVelocityTick; }
     public void setPendingNativeProjectileVelocityTick(long tick) { this.pendingNativeProjectileVelocityTick = tick; }
     public void clearPendingNativeProjectileVelocity() { this.pendingNativeProjectileVelocityTick = Long.MIN_VALUE; }

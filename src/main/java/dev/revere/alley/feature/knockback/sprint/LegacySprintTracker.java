@@ -125,6 +125,27 @@ public final class LegacySprintTracker {
         if (this.manager.isLegacyKnockback(player)) state(player).clientStart();
     }
 
+    /**
+     * Drops sprint on both sides for an involuntary stop (consumable, backing
+     * up, pause). Clears any in-flight W-tap marker so it can never be credited.
+     */
+    public void dropSyntheticSprint(Player player) {
+        if (!this.manager.isLegacyKnockback(player)) return;
+        SprintState state = this.states.get(player.getUniqueId());
+        if (state != null) state.resetForcedStop();
+    }
+
+    /**
+     * Automatic re-sprint after a forced stop. A 1.8 client re-sends
+     * START_SPRINTING while W is held, so the sprint knockback bonus is
+     * re-earned, but the stop was not a deliberate tap and must not arm the
+     * W-tap extra.
+     */
+    public void restartSyntheticSprint(Player player) {
+        if (!this.manager.isLegacyKnockback(player)) return;
+        state(player).syntheticRestart();
+    }
+
     private SprintState state(Player player) {
         return this.states.computeIfAbsent(
                 player.getUniqueId(), ignored -> new SprintState(player.isSprinting()));
@@ -169,6 +190,31 @@ public final class LegacySprintTracker {
             }
             this.clientSprinting = false;
             this.knockbackEligible = false;
+        }
+
+        /**
+         * Automatic restart after a forced stop: sprint and eligibility are
+         * restored, the tap marker is cleared so it is never credited as a
+         * deliberate W-tap.
+         */
+        private synchronized void syntheticRestart() {
+            this.clientSprinting = true;
+            this.knockbackEligible = true;
+            this.pendingStop = false;
+            this.restartedAfterStop = false;
+            this.lastStopNanos = Long.MIN_VALUE;
+        }
+
+        /**
+         * Involuntary stop on both sides. Clears any in-flight tap marker so a
+         * forced stop can never be credited as a W-tap.
+         */
+        private synchronized void resetForcedStop() {
+            this.clientSprinting = false;
+            this.knockbackEligible = false;
+            this.pendingStop = false;
+            this.restartedAfterStop = false;
+            this.lastStopNanos = Long.MIN_VALUE;
         }
 
         private synchronized boolean hasKnockbackEligibility() {

@@ -636,6 +636,11 @@ public class KnockbackListener implements Listener {
         if (!data.isCaptureServerControlledVelocity()) return;
 
         data.setCaptureServerControlledVelocity(false);
+        // Bukkit applies this velocity right after the event. It is retained
+        // only so the Bot's feedback layer (legacy flinch / crit window) can see
+        // what was applied; consumers must NOT call setVelocity with it again or
+        // the Bot travels the knockback for an extra tick and flies farther than
+        // a real player receiving the identical vector.
         data.setServerControlledVelocity(event.isCancelled() ? null : event.getVelocity().clone());
     }
 

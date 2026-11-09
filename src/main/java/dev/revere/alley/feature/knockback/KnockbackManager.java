@@ -141,6 +141,8 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 configChanged |= setIfMissing(config, "arrow.vertical_limit", 0.4D);
                 configChanged |= setIfMissing(config, "arrow.punch_horizontal", 0.6D);
                 configChanged |= setIfMissing(config, "arrow.punch_vertical", 0.1D);
+                // Surface the anti-whiff switch in existing server configs too.
+                configChanged |= setIfMissing(config, "melee.anti_whiff", true);
             }
             if (!config.isSet(HIT_DELAY_FORMAT_KEY)) {
                 int legacyDelay = Math.max(0, config.getInt("hit_delay", 10));
@@ -164,13 +166,11 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 config.set("potion.horizontal_compensation", 0.0);
                 configChanged = true;
             }
-            if (name.equalsIgnoreCase("1_8")
-                    && Math.abs(config.getDouble("hitbox.length", 0.7D) - 0.7D) < 1.0E-6D
-                    && Math.abs(config.getDouble("hitbox.height", 1.8D) - 1.8D) < 1.0E-6D) {
-                config.set("hitbox.length", 0.8D);
-                config.set("hitbox.height", 2.0D);
-                configChanged = true;
-            }
+            // 1.8 melee uses the standing 0.6 x 1.8 box expanded by 0.1
+            // (Entity#getCollisionBorderSize), so the profile's own hitbox keys
+            // must stay at their vanilla values. The old migration rewrote
+            // 0.7/1.8 to 0.8/2.0, which widened the box beyond 1.8 for every
+            // consumer that reads these keys.
             if (configChanged) {
                 try {
                     config.save(f);
@@ -444,6 +444,28 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     /**
+     * Drops the Bot's synthetic sprint eligibility without opening a W-tap
+     * window, for involuntary stops such as its own attack, knockback or
+     * backing up. Only a deliberate STOP -> START may arm the W-tap extra.
+     */
+    public void dropSyntheticLegacySprint(Player player) {
+        if (legacySprintTracker != null) {
+            legacySprintTracker.dropSyntheticSprint(player);
+        }
+    }
+
+    /**
+     * Re-sprints after a forced stop without arming the W-tap extra. The sprint
+     * knockback bonus is re-earned (like a 1.8 client re-sending
+     * START_SPRINTING) but only a deliberate STOP -> START may add a W-tap.
+     */
+    public void restartSyntheticLegacySprint(Player player) {
+        if (legacySprintTracker != null) {
+            legacySprintTracker.restartSyntheticSprint(player);
+        }
+    }
+
+    /**
      * Mirrors the 1.8 attacker's horizontal slowdown without using Bukkit
      * setVelocity for a real client. Bukkit marks that call for a velocity
      * packet, which would also shrink an in-flight knockback packet.
@@ -477,18 +499,36 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     /**
-     * Delivers a pending profile velocity for a server-side Player implementation
-     * that does not emit a client velocity event (for example the built-in Bot).
-     * Returns null when another event already consumed the pending state.
+     * Returns the knockback vector that was captured from the target's
+     * PlayerVelocityEvent, without applying it. Used by the Bot feedback layer
+     * to react to a hit it has already received.
+     */
+    public Vector consumeCapturedKnockback(Player player) {
+        return getPlayerData(player).consumeCapturedKnockback();
+    }
+
+    /**
+     * Delivers the profile knockback for a server-side Player implementation.
+     *
+     * <p>A synthetic Bot has no client, so the vector applied inside
+     * PlayerVelocityEvent never reaches its entity: the event's velocity is
+     * only transmitted to a real client. This method is therefore the actual
+     * delivery path for the Bot and must apply the velocity exactly once.</p>
+     *
+     * <p>Both slots are drained on every call: the profile vector (pending hit)
+     * and the vector captured from the velocity event (synthetic projectile or
+     * cancelled-event paths). Whichever exists is applied, and the other is
+     * cleared so a stale copy can never be applied on a later tick.</p>
      */
     public Vector deliverPendingKnockback(Player player) {
-        Vector applied = consumeServerControlledVelocity(player);
-        if (applied == null) applied = consumePendingKnockback(player, player.getVelocity());
+        PlayerKnockbackData data = getPlayerData(player);
+        Vector captured = data.consumeCapturedKnockback();
+        Vector pending = consumePendingKnockback(player, player.getVelocity());
+        Vector applied = pending != null ? pending : captured;
         if (applied != null) {
             player.setVelocity(applied);
-            return applied;
         }
-        return null;
+        return applied;
     }
 
     public void applyLegacyPearlKnockback(Player attacker, Player victim, Vector impactVelocity) {

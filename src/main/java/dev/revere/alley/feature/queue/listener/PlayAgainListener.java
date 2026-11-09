@@ -5,6 +5,7 @@ import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.enums.ProfileState;
+import dev.revere.alley.feature.bot.BotService;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.match.MatchState;
@@ -30,6 +31,8 @@ import java.util.Set;
 
 public class PlayAgainListener implements Listener {
     public static final String KIT_KEY = "play_again_kit";
+    /** Present only on papers handed out by a Bot match: id of the Bot difficulty. */
+    public static final String BOT_KEY = "play_again_bot";
 
     /**
      * Players who requested Play Again while their match was still ending. The actual
@@ -76,9 +79,74 @@ public class PlayAgainListener implements Listener {
             return true;
         }
 
-        if (queueForPlayAgain(player, kit)) {
+        String botDifficulty = item.getItemMeta().getPersistentDataContainer().get(
+                new NamespacedKey(AlleyPlugin.getInstance(), BOT_KEY), PersistentDataType.STRING);
+        boolean handled = botDifficulty == null || botDifficulty.isBlank()
+                ? queueForPlayAgain(player, kit)
+                : queueForBotRematch(player, kit, botDifficulty);
+        if (handled) {
             item.setAmount(0);
         }
+        return true;
+    }
+
+    /**
+     * Starts a new Bot duel with the same kit and difficulty, delayed two ticks so
+     * the lobby release settles first (mirrors the queue path).
+     */
+    public static boolean queueForBotRematch(Player player, Kit kit, String difficultyId) {
+        if (player == null || kit == null || difficultyId == null || difficultyId.isBlank()) {
+            return false;
+        }
+
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        Profile playerProfile = profileService.getProfile(player.getUniqueId());
+        if (playerProfile == null) {
+            player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
+            return false;
+        }
+
+        // Released by releasePlayerForPlayAgain; otherwise this paper was clicked
+        // after the match already returned the player to the lobby.
+        MatchState matchState = playerProfile.getMatch() == null ? null : playerProfile.getMatch().getState();
+        if (playerProfile.getState() == ProfileState.PLAYING
+                && (matchState == MatchState.ENDING_MATCH || matchState == MatchState.ENDING_ROUND)) {
+            PENDING_PLAY_AGAIN.add(player.getUniqueId());
+            if (!playerProfile.getMatch().releasePlayerForPlayAgain(player)) {
+                PENDING_PLAY_AGAIN.remove(player.getUniqueId());
+                player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
+                return false;
+            }
+        } else if (playerProfile.getState() != ProfileState.LOBBY || playerProfile.getMatch() != null) {
+            player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
+            return false;
+        }
+
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+            PENDING_PLAY_AGAIN.remove(player.getUniqueId());
+            Profile currentProfile = profileService.getProfile(player.getUniqueId());
+            if (!player.isOnline() || currentProfile == null
+                    || currentProfile.getState() != ProfileState.LOBBY
+                    || currentProfile.getMatch() != null
+                    || currentProfile.getQueueProfile() != null) {
+                return;
+            }
+            if (player.isDead()) player.spigot().respawn();
+            MatchResultFlight.clear(player);
+            player.setAllowFlight(false);
+            player.setFlying(false);
+            AlleyPlugin.getInstance().getService(SpawnService.class).teleportToSpawn(player);
+            BotService botService = AlleyPlugin.getInstance().getService(BotService.class);
+            // The ending session still holds the "one session per player" slot until
+            // its delayed cleanup finishes, so hand the rematch over to the service
+            // when that happens instead of calling startMatch here.
+            if (botService.getSession(player) != null) {
+                ((dev.revere.alley.feature.bot.internal.BotServiceImpl) botService)
+                        .scheduleRematch(player, kit, difficultyId);
+            } else {
+                botService.startMatch(player, kit, difficultyId);
+            }
+        }, 2L);
         return true;
     }
 

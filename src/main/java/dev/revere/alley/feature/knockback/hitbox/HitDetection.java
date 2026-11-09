@@ -129,6 +129,18 @@ public class HitDetection implements Listener {
 
             KnockbackProfile profile = manager.getAppliedProfile(attacker);
             if (profile == null) continue;
+
+            // The fallback is a server-side re-attack for a click the client could
+            // not resolve. It must be re-validated against the target's CURRENT
+            // position: one tick of knockback/retreat is enough to move 0.3+ blocks,
+            // which used to let this "anti-whiff" path land hits well beyond the
+            // 1.8 three-block reach.
+            RayContext context = createRayContext(attacker, profile);
+            if (context == null) continue;
+            RayHit hit = resolveHit(attacker, target, profile, context);
+            if (hit == null) continue;
+            if (isBlocked(context.eye(), hit.position())) continue;
+
             fireAttack(attacker, target, profile);
         }
     }
@@ -148,58 +160,38 @@ public class HitDetection implements Listener {
     }
 
     private void detectAndAttack(Player attacker, KnockbackProfile profile, int currentTick) {
-        Location eye = attacker.getEyeLocation();
-        Vector direction = eye.getDirection();
-        Ray ray = new Ray(eye.toVector(), direction);
-
-        boolean legacyMelee = hasLegacySwordCombat(attacker);
-        AABB expandedBox = null;
-        if (!legacyMelee) {
-            double halfWidth = profile.getHitboxLength() / 2.0D;
-            double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - 1.8D) / 2.0D);
-            expandedBox = new AABB(
-                    new Vector(-halfWidth, -verticalExpansion, -halfWidth),
-                    new Vector(halfWidth, profile.getHitboxHeight() - verticalExpansion, halfWidth));
-        }
-        AABB vanillaBox = AABB.fromSize(0.6D, 1.8D);
-        double maxDistance = getMaxDistance(profile);
-        if (maxDistance <= 0.0D) return;
+        RayContext context = createRayContext(attacker, profile);
+        if (context == null) return;
 
         Player closest = null;
         Vector closestHit = null;
-        double closestDistance = maxDistance;
+        double closestDistance = context.maxDistance();
         boolean vanillaHit = false;
 
         for (Entity entity : attacker.getNearbyEntities(
-                maxDistance + 2.0D, maxDistance + 2.0D, maxDistance + 2.0D)) {
+                context.maxDistance() + 2.0D, context.maxDistance() + 2.0D,
+                context.maxDistance() + 2.0D)) {
             if (!(entity instanceof Player victim) || !isUsableTarget(victim)
                     || victim.getUniqueId().equals(attacker.getUniqueId())) continue;
 
-            Vector visualOffset = getVisualOffset(attacker, victim, profile);
-            Vector origin = victim.getLocation().toVector().add(visualOffset);
-            Vector hit = legacyMelee
-                    ? AABB.fromBoundingBox(LegacyHitboxes.meleeTarget(victim))
-                            .translate(visualOffset)
-                            .intersectsRay(ray, 0.0F, (float) maxDistance)
-                    : expandedBox.translate(origin).intersectsRay(
-                            ray, 0.0F, (float) maxDistance);
+            RayHit hit = resolveHit(attacker, victim, profile, context);
             if (hit == null) continue;
-
-            double distance = eye.toVector().distance(hit);
+            double distance = hit.distance();
             if (distance <= closestDistance) {
                 closest = victim;
-                closestHit = hit;
+                closestHit = hit.position();
                 closestDistance = distance;
-                vanillaHit = (legacyMelee
-                        ? AABB.fromBoundingBox(victim.getBoundingBox()).translate(visualOffset)
-                        : vanillaBox.translate(origin))
-                        .intersectsRay(ray, 0.0F, (float) maxDistance) != null;
+                vanillaHit = hit.vanillaHit();
             }
         }
 
+        Location eye = context.eye();
         if (closest == null || closestHit == null || isBlocked(eye, closestHit)) return;
 
         if (vanillaHit) {
+            // Anti-whiff is an Alley extra, not vanilla 1.8; it can be disabled
+            // per profile (knockback/*.yml -> melee.anti_whiff).
+            if (!profile.isMeleeAntiWhiff()) return;
             // Do not turn a genuine 1.8 hurt-window empty click into a delayed hit.
             if (manager.isInsideHurtResistanceWindow(closest)) return;
             AcceptedHit accepted = acceptedHits.get(attacker.getUniqueId());
@@ -211,6 +203,57 @@ public class HitDetection implements Listener {
         }
 
         fireAttack(attacker, closest, profile);
+    }
+
+    /**
+     * Builds the per-swing ray state: eye position, direction, the 1.8-style
+     * max distance, and which hitbox variant applies.
+     */
+    private RayContext createRayContext(Player attacker, KnockbackProfile profile) {
+        double maxDistance = getMaxDistance(profile);
+        if (maxDistance <= 0.0D) return null;
+
+        Location eye = attacker.getEyeLocation();
+        Vector direction = eye.getDirection();
+        if (direction.lengthSquared() < 1.0E-8D) return null;
+
+        boolean legacyMelee = hasLegacySwordCombat(attacker);
+        AABB expandedBox = null;
+        if (!legacyMelee) {
+            double halfWidth = profile.getHitboxLength() / 2.0D;
+            double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - 1.8D) / 2.0D);
+            expandedBox = new AABB(
+                    new Vector(-halfWidth, -verticalExpansion, -halfWidth),
+                    new Vector(halfWidth, profile.getHitboxHeight() - verticalExpansion, halfWidth));
+        }
+        return new RayContext(eye, new Ray(eye.toVector(), direction), expandedBox,
+                AABB.fromSize(0.6D, 1.8D), maxDistance, legacyMelee);
+    }
+
+    /**
+     * Intersects the current swing ray with one target's 1.8/legacy or profile
+     * hitbox, and reports whether the vanilla box would also have been hit.
+     * Returns null when the ray misses.
+     */
+    private RayHit resolveHit(Player attacker, Player target, KnockbackProfile profile,
+                              RayContext context) {
+        Vector visualOffset = getVisualOffset(attacker, target, profile);
+        Vector origin = target.getLocation().toVector().add(visualOffset);
+        float maxDistance = (float) context.maxDistance();
+
+        Vector hit = context.legacyMelee()
+                ? AABB.fromBoundingBox(LegacyHitboxes.meleeTarget(target))
+                        .translate(visualOffset)
+                        .intersectsRay(context.ray(), 0.0F, maxDistance)
+                : context.expandedBox().translate(origin)
+                        .intersectsRay(context.ray(), 0.0F, maxDistance);
+        if (hit == null) return null;
+
+        boolean vanillaHit = (context.legacyMelee()
+                ? AABB.fromBoundingBox(target.getBoundingBox()).translate(visualOffset)
+                : context.vanillaBox().translate(origin))
+                .intersectsRay(context.ray(), 0.0F, maxDistance) != null;
+        return new RayHit(hit, context.eye().toVector().distance(hit), vanillaHit);
     }
 
     private Vector getVisualOffset(Player attacker, Player target, KnockbackProfile profile) {
@@ -260,8 +303,28 @@ public class HitDetection implements Listener {
         if (profile.isStopSprint() && applyLegacySlowdown) attacker.setSprinting(false);
     }
 
+    /**
+     * Maximum eye-to-hitbox distance, mirroring 1.8's 3.0 block entity pick.
+     *
+     * <p>The configured {@code modern.entity_interaction_range} is deliberately
+     * allowed to be 3.0 even though the legacy melee box is already expanded by
+     * 0.1. That is not a 0.1-block extension: the value is a cap on the measured
+     * eye-to-intersection distance, so a 3.0 ray can still only reach a target
+     * whose expanded box is within 3.0. Lowering it to 2.9 would make the reach
+     * measurably *shorter* than 1.8, because the +0.1 expansion is not added on
+     * top of this cap.</p>
+     */
     private double getMaxDistance(KnockbackProfile profile) {
         return Math.max(0.0D, Math.min(3.0D, profile.getEntityInteractionRange()));
+    }
+
+    /** Per-swing ray state shared by the immediate hit and the delayed fallback. */
+    private record RayContext(Location eye, Ray ray, AABB expandedBox, AABB vanillaBox,
+                              double maxDistance, boolean legacyMelee) {
+    }
+
+    /** A resolved hitbox intersection for one target. */
+    private record RayHit(Vector position, double distance, boolean vanillaHit) {
     }
 
     private boolean isUsableTarget(Player player) {

@@ -20,7 +20,7 @@ public final class CustomBotProfile {
     private double movementSpeed = 1.0D;
     private double aimSpeed = 22.0D;
     private double aimError = 0.08D;
-    private int ping;
+    private int ping = 50;
     private boolean tryhard = true;
     private boolean wTap = true;
     private double wTapRate = 0.65D;
@@ -33,6 +33,12 @@ public final class CustomBotProfile {
     private int lavaTicks = 12;
     private boolean antiFire = true;
     private double healHealth = 9.0D;
+    private double clickJitter = 0.20D;
+    private double misclickChance = 0.04D;
+    private double aimSmoothing = 0.65D;
+    private int switchDelayTicks = 1;
+    private double critChance = 0.75D;
+    private double blockHitRate = 0.15D;
 
     public static boolean isValidName(String name) {
         return name != null && VALID_NAME.matcher(name).matches();

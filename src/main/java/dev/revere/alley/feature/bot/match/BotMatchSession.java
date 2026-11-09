@@ -74,7 +74,9 @@ import org.bukkit.util.BoundingBox;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,13 +96,24 @@ public final class BotMatchSession {
     private static final int GOLDEN_APPLE_USE_TICKS = 32;
     private static final int BUFF_POTION_USE_TICKS = 32;
     private static final int BLOCK_HIT_USE_TICKS = 10;
-    private static final double BLOCK_HIT_TRIGGER_RATE = 0.15D;
     private static final double BLOCK_HIT_MOVEMENT_SCALE = 0.2D;
     private static final double BLOCK_HIT_MOVEMENT_STEP = 0.2D;
     /** A received Legacy KB must actually lift the Bot before it can arm a crit retry. */
     private static final double LEGACY_CRIT_MIN_UPWARD_KB = 0.08D;
     /** Do not retain a stale airborne-combat marker after the normal jump arc has ended. */
     private static final int LEGACY_CRIT_WINDOW_TICKS = 14;
+    /** Number of ticks used to ease W input down after a Legacy hit. */
+    private static final int LEGACY_KB_INPUT_RELEASE_TICKS = 3;
+    /** Maximum number of perceived target positions kept for latency-based aim. */
+    private static final int AIM_HISTORY_SIZE = 10;
+    /** A trade is still considered active this many ticks after the Bot took a hit. */
+    private static final int TRADE_WINDOW_TICKS = 12;
+    /** Melee distance inside which a hit counts as a trade even without taking damage. */
+    private static final double TRADE_DISTANCE_SQUARED = 3.2D * 3.2D;
+    /** Minimum spacing between two W-tap resets so the Bot cannot stutter in place. */
+    private static final int WTAP_MIN_INTERVAL_TICKS = 6;
+    /** Longest W release; a real W-tap is a 1-3 tick tap, not a full stop. */
+    private static final int WTAP_MAX_RELEASE_TICKS = 3;
     private static final int BOW_CHARGE_TICKS = 18;
     private static final int BOW_USE_DURATION_TICKS = 72_000;
     private static final int BLOCK_AIM_TICKS = 2;
@@ -184,11 +197,31 @@ public final class BotMatchSession {
     private ItemStack healingPotion;
     private Vector healingEscapeDirection;
     private double attackProgress;
-    private long wTapReleaseUntilNanos;
+    private double attackRatePerTick;
+    private int pendingAttackTick = -1;
+    private double pendingAttackReach;
+    private boolean pendingAttackSwingOnly;
+    private boolean pendingAttackCritical;
+    private int itemSwitchReadyTick;
+    private final ArrayDeque<AimSnapshot> aimHistory = new ArrayDeque<>();
+    private double aimOffsetX;
+    private double aimOffsetY;
+    private double aimOffsetZ;
+    private double aimHeightFraction = 0.86D;
+    private double aimHeightTargetFraction = 0.86D;
+    private int nextAimHeightChangeTick;
+    private int wTapReleaseUntilTick;
+    private int lastWTapTick = Integer.MIN_VALUE;
+    private int lastBotDamagedTick = Integer.MIN_VALUE;
     private boolean pendingWTap;
+    private boolean attackAcceptedThisSwing;
+    private boolean wtapAppliedThisSwing;
+    /** True while a W-tap release is waiting for its restart to be credited. */
+    private boolean wtapReArmPending;
     private boolean blockHitActive;
     private int blockHitUntilTick;
     private double blockHitMovementScale = 1.0D;
+    private int pendingBlockHitStartTick = -1;
     private boolean pausedForOpponent;
     private int attackAttemptSequence;
     private int acceptedAttackSequence;
@@ -200,8 +233,15 @@ public final class BotMatchSession {
     private int legacyInputRecoveryTick;
     private int legacySprintResumeTick;
     private int lastLegacyKnockbackRecoveryTick = Integer.MIN_VALUE;
+    private int legacyKnockbackReactionAtTick = Integer.MIN_VALUE;
+    private double legacyKnockbackInputTarget = 1.0D;
+    private int legacyKnockbackReleaseUntilTick = Integer.MIN_VALUE;
+    private double legacyKnockbackRecoveryJitter = 1.0D;
     private int legacyCritWindowUntilTick;
+    private int legacyCritArmedAtTick = Integer.MIN_VALUE;
+    private int legacyCritReadyAtTick = Integer.MIN_VALUE;
     private boolean legacyCritAttackReady;
+    private boolean legacyCritRolled;
 
     public BotMatchSession(BotServiceImpl service, Player player, Kit kit, Arena arena,
                            BotDifficultyProfile difficulty, FileConfiguration config,
@@ -481,6 +521,10 @@ public final class BotMatchSession {
             return;
         }
 
+        recordAimSnapshot();
+        tickLegacyKnockbackReaction();
+        tickPendingAttack();
+
         tickBotBlockHit();
         if (pauseForOpponent()) {
             if (this.blockHitActive) return;
@@ -567,9 +611,12 @@ public final class BotMatchSession {
         boolean nativeProjectilePending = pendingNativeTick != Long.MIN_VALUE
                 && manager.getCurrentTick() >= pendingNativeTick
                 && manager.getCurrentTick() - pendingNativeTick <= 1L;
+
+        // deliverPendingKnockback is the Bot's real delivery path: a synthetic
+        // player has no client, so the velocity event alone never moves it.
+        // It applies the vector exactly once.
         Vector applied = manager.deliverPendingKnockback(bot);
         if (applied != null) {
-            bot.setVelocity(applied);
             handleKnockbackApplied(applied, "bot-tick");
         } else if (nativeProjectilePending) {
             Vector nativeVelocity = bot.getVelocity();
@@ -595,8 +642,13 @@ public final class BotMatchSession {
         }
         if (usesLegacyBotMovement() && velocity != null
                 && velocity.getY() >= LEGACY_CRIT_MIN_UPWARD_KB) {
-            this.legacyCritWindowUntilTick = this.ticks + LEGACY_CRIT_WINDOW_TICKS;
+            // A client only perceives its own upward knockback after the network
+            // round trip, so the airborne crit window is armed with the same delay.
+            this.legacyCritArmedAtTick = this.ticks + difficulty.getLatencyTicks();
+            this.legacyCritWindowUntilTick = this.legacyCritArmedAtTick + LEGACY_CRIT_WINDOW_TICKS;
+            this.legacyCritReadyAtTick = Integer.MIN_VALUE;
             this.legacyCritAttackReady = false;
+            this.legacyCritRolled = false;
         }
         if (this.debug) {
             trace("KB applied via " + source + " profile=" + data.getProfileName()
@@ -618,11 +670,35 @@ public final class BotMatchSession {
 
     public void handleAcceptedBotKnockback() {
         if (this.ended || this.bot == null || !usesLegacyBotMovement()) return;
+        this.lastBotDamagedTick = this.ticks;
         if (this.lastLegacyKnockbackRecoveryTick != Integer.MIN_VALUE
                 && this.ticks - this.lastLegacyKnockbackRecoveryTick <= 1) return;
 
         this.lastLegacyKnockbackRecoveryTick = this.ticks;
+        int latency = difficulty.getLatencyTicks();
+        if (latency <= 0) {
+            applyLegacyKnockbackRecovery();
+            return;
+        }
+        // Keep the earliest scheduled flinch; a second hit must not postpone it.
+        if (this.legacyKnockbackReactionAtTick == Integer.MIN_VALUE
+                || this.legacyKnockbackReactionAtTick <= this.ticks) {
+            this.legacyKnockbackReactionAtTick = this.ticks + latency;
+        }
+    }
+
+    private void applyLegacyKnockbackRecovery() {
+        this.legacyKnockbackReactionAtTick = Integer.MIN_VALUE;
+        this.legacyKnockbackRecoveryJitter =
+                ThreadLocalRandom.current().nextDouble(0.75D, 1.25D);
         beginLegacyMovementRecovery(true, true);
+    }
+
+    private void tickLegacyKnockbackReaction() {
+        if (!usesLegacyBotMovement()) return;
+        if (this.legacyKnockbackReactionAtTick == Integer.MIN_VALUE
+                || this.ticks < this.legacyKnockbackReactionAtTick) return;
+        applyLegacyKnockbackRecovery();
     }
 
     private void tickCountdown() {
@@ -638,6 +714,17 @@ public final class BotMatchSession {
 
         running = true;
         this.runningTicks = 0;
+        this.aimHistory.clear();
+        this.attackProgress = 0.0D;
+        this.attackRatePerTick = 0.0D;
+        this.pendingAttackTick = -1;
+        this.pendingBlockHitStartTick = -1;
+        this.legacyKnockbackReactionAtTick = Integer.MIN_VALUE;
+        this.wTapReleaseUntilTick = 0;
+        this.lastWTapTick = Integer.MIN_VALUE;
+        this.wtapReArmPending = false;
+        this.wtapAppliedThisSwing = false;
+        this.lastBotDamagedTick = Integer.MIN_VALUE;
         bot.teleport(this.botSpawnLocation);
         bot.setVelocity(new Vector());
         bot.setFallDistance(0.0F);
@@ -672,7 +759,7 @@ public final class BotMatchSession {
             this.buffPotionSlot = holdItem(slot);
             this.buffPotionFinishTick = this.ticks + BUFF_POTION_USE_TICKS;
             this.buffPotionEffects = List.copyOf(effects);
-            setBotSprinting(false);
+            dropBotSprint();
             setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
             startUsingHeldItem(BUFF_POTION_USE_TICKS);
             bot.updateInventory();
@@ -688,7 +775,7 @@ public final class BotMatchSession {
             return;
         }
 
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.buffPotionFinishTick) {
             keepUsingHeldItem(Math.min(BUFF_POTION_USE_TICKS,
@@ -759,7 +846,8 @@ public final class BotMatchSession {
             this.pausedForOpponent = true;
             interruptForOpponentPause();
         }
-        setBotSprinting(false);
+        // Pausing is not a deliberate W-tap reset; never let it arm the extra.
+        dropBotSprint();
         nativeBot.clearMovementInput();
         return true;
     }
@@ -810,6 +898,8 @@ public final class BotMatchSession {
     }
 
     private void interruptForOpponentPause() {
+        this.pendingAttackTick = -1;
+        this.pendingBlockHitStartTick = -1;
         if (this.healingPotionSlot >= 0 || this.healingRecoveryTick > 0) cancelHealingAction();
         if (this.bowSlot >= 0) finishBowCharge(false);
         if (this.buildingSlot >= 0) clearBlockPlacement();
@@ -834,7 +924,9 @@ public final class BotMatchSession {
         Location target = getAimTarget();
         faceTarget(target);
         if (isWTapReleasing()) {
-            setBotSprinting(false);
+            // A W-tap is a 1-3 tick W release. The sprint stop was already issued
+            // by confirmBotAttack, so do not touch the tracker here: dropping it
+            // again would clear the pending STOP and erase the W-tap itself.
             if (usesLegacyBotMovement()) {
                 this.legacyForwardInput = 0.0D;
                 this.legacyStrafeInput = approach(
@@ -860,14 +952,20 @@ public final class BotMatchSession {
     private void updateLegacyNavigation(Location target, double desiredStrafe) {
         initializeLegacyMovement();
 
-        if (this.ticks >= this.legacyInputRecoveryTick) {
+        if (this.ticks < this.legacyInputRecoveryTick) {
+            // A human releases W gradually after being hit; do not snap the input
+            // to the configured floor in a single tick.
+            double releaseStep = Math.max(0.05D,
+                    (1.0D - this.legacyKnockbackInputTarget) / LEGACY_KB_INPUT_RELEASE_TICKS);
             this.legacyForwardInput = approach(
-                    this.legacyForwardInput, 1.0D, this.legacyInputRecoveryStep);
-            this.legacyStrafeInput = approach(
-                    this.legacyStrafeInput, desiredStrafe, this.legacyStrafeRecoveryStep);
+                    this.legacyForwardInput, this.legacyKnockbackInputTarget, releaseStep);
+            this.legacyStrafeInput = approach(this.legacyStrafeInput, 0.0D,
+                    this.legacyStrafeRecoveryStep * this.legacyKnockbackRecoveryJitter);
         } else {
-            this.legacyStrafeInput = approach(
-                    this.legacyStrafeInput, 0.0D, this.legacyStrafeRecoveryStep);
+            this.legacyForwardInput = approach(this.legacyForwardInput, 1.0D,
+                    this.legacyInputRecoveryStep * this.legacyKnockbackRecoveryJitter);
+            this.legacyStrafeInput = approach(this.legacyStrafeInput, desiredStrafe,
+                    this.legacyStrafeRecoveryStep * this.legacyKnockbackRecoveryJitter);
         }
 
         Vector offset = target.toVector().subtract(bot.getLocation().toVector()).setY(0.0D);
@@ -880,17 +978,21 @@ public final class BotMatchSession {
         if (canSprint) {
             if (!bot.isSprinting()) rearmBotSprint();
         } else if (movingForward) {
-            // This is only the server movement state. A forced attack stop does
-            // not become a synthetic client STOP packet.
-            bot.setSprinting(false);
+            // Keep the tracker untouched when sprint is already off: a pending
+            // W-tap lives in exactly that state and must not be cleared here.
+            if (bot.isSprinting()) dropBotSprint();
         } else if (bot.isSprinting()) {
             // Moving backwards drops sprint on the 1.8 client.
-            setBotSprinting(false);
+            dropBotSprint();
             this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
                     this.ticks + this.legacySprintRestartDelayTicks);
         }
 
-        nativeBot.moveToward(target, this.legacyForwardInput * this.blockHitMovementScale,
+        // While blocking, the block-hit movement scale is the *only* slowdown.
+        // Letting a knockback flinch scale W at the same time multiplied them
+        // together (0.2 * 0.35 = 0.07) and left the Bot frozen mid-path.
+        double forwardInput = this.blockHitActive ? 1.0D : this.legacyForwardInput;
+        nativeBot.moveToward(target, forwardInput * this.blockHitMovementScale,
                 difficulty.getCombatDistance(), this.legacyStrafeInput);
     }
 
@@ -900,15 +1002,14 @@ public final class BotMatchSession {
 
     private void restoreCombatNavigation() {
         if (nativeBot == null || !nativeBot.isSpawned()) return;
+        // During a W-tap release, leave the tracker alone so its pending STOP
+        // survives and the tap can still be credited.
+        if (this.pausedForOpponent || isWTapReleasing()) return;
         if (usesLegacyBotMovement()) {
-            if (this.pausedForOpponent || isWTapReleasing()) {
-                bot.setSprinting(false);
-            } else {
-                beginLegacyMovementRecovery(false, false);
-            }
+            beginLegacyMovementRecovery(false, false);
             return;
         }
-        setBotSprinting(!this.pausedForOpponent && !isWTapReleasing());
+        setBotSprinting(true);
     }
 
     private void initializeLegacyMovement() {
@@ -918,28 +1019,39 @@ public final class BotMatchSession {
         this.legacyStrafeInput = 0.0D;
         this.legacyInputRecoveryTick = this.ticks + this.legacyKnockbackInputDelayTicks;
         this.legacySprintResumeTick = this.ticks + this.legacySprintRestartDelayTicks;
-        setBotSprinting(false);
+        // First Legacy tick: a 1.8 client starts the match not sprinting, so
+        // this is a real STOP rather than a forced one, but it must not leave a
+        // pending-stop marker that later credits a W-tap.
+        dropBotSprint();
     }
 
-    private void beginLegacyMovementRecovery(boolean reduceInput, boolean clientStop) {
+    private void beginLegacyMovementRecovery(boolean reduceInput, boolean knockbackFlinch) {
         if (!usesLegacyBotMovement()) return;
         initializeLegacyMovement();
 
         if (reduceInput) {
-            this.legacyForwardInput = Math.min(
-                    this.legacyForwardInput, this.legacyKnockbackInputScale);
-            this.legacyStrafeInput = 0.0D;
+            this.legacyKnockbackInputTarget = this.legacyKnockbackInputScale;
+            this.legacyKnockbackReleaseUntilTick = this.ticks + LEGACY_KB_INPUT_RELEASE_TICKS;
             this.legacyInputRecoveryTick = Math.max(this.legacyInputRecoveryTick,
-                    this.ticks + this.legacyKnockbackInputDelayTicks);
+                    this.legacyKnockbackReleaseUntilTick + this.legacyKnockbackInputDelayTicks);
         }
         this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
-                this.ticks + this.legacySprintRestartDelayTicks);
-
-        if (clientStop) {
-            setBotSprinting(false);
-        } else {
-            bot.setSprinting(false);
+                this.ticks + this.legacySprintRestartDelayTicks + difficulty.getLatencyTicks());
+        if (knockbackFlinch) {
+            this.lastBotDamagedTick = this.ticks;
+            // Taking damage does not clear the sprint key in 1.8; only the
+            // movement input is reduced. Leave the sprint tracker untouched so
+            // this hit cannot open a pending W-tap stop.
+            return;
         }
+        // The Bot's own attack: 1.8 clears sprint locally, so the client has to
+        // re-send START_SPRINTING. Dropping the pending marker here means the
+        // restart below re-earns the sprint bonus without ever being read as a
+        // deliberate W-tap. Re-arming it on the same tick made every click a
+        // sprint hit and knocked targets much farther than a real player at the
+        // same CPS.
+        this.wtapReArmPending = false;
+        dropBotSprint();
     }
 
     private boolean usesLegacyBotMovement() {
@@ -952,16 +1064,51 @@ public final class BotMatchSession {
         return target;
     }
 
+    /**
+     * Mirrors the Bot pressing/releasing its sprint key. A release here is a
+     * deliberate client STOP, which is exactly what the W-tap tracker needs.
+     * Forced stops (knockback, block-hit, consumables) must use
+     * {@link #dropBotSprint()} instead so they never masquerade as a W-tap.
+     */
     private void setBotSprinting(boolean sprinting) {
         bot.setSprinting(sprinting);
         AlleyPlugin.getInstance().getService(KnockbackManager.class)
                 .updateSyntheticLegacySprint(bot, sprinting);
     }
 
+    /**
+     * Drops sprint without opening a W-tap window. Only a deliberate
+     * STOP -> START must be able to grant the W-tap extra, so forced stops
+     * (knockback recovery, block-hit, backing up, its own attack) use this.
+     */
+    private void dropBotSprint() {
+        // Any forced stop invalidates a W-tap that has not been credited yet.
+        this.wtapReArmPending = false;
+        bot.setSprinting(false);
+        AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .dropSyntheticLegacySprint(bot);
+    }
+
+    /**
+     * Restores sprint after the Bot's own hit. The stop above dropped the
+     * synthetic client's sprint, so this is a real false -> true transition: a
+     * 1.8 client re-sends START_SPRINTING here, which re-earns the sprint
+     * knockback bonus but never the deliberate W-tap extra. Delaying it by the
+     * sprint restart ticks keeps the per-click 0.6 motion cut meaningful, just
+     * like a real player who has to re-accelerate after every click.
+     */
     private void rearmBotSprint() {
         bot.setSprinting(true);
-        AlleyPlugin.getInstance().getService(KnockbackManager.class)
-                .forceSyntheticLegacySprintStart(bot);
+        KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        if (this.wtapReArmPending) {
+            // Deliberate STOP -> START: this one may arm the W-tap extra.
+            this.wtapReArmPending = false;
+            manager.forceSyntheticLegacySprintStart(bot);
+        } else {
+            // Automatic re-sprint after a forced stop. It re-earns the sprint
+            // knockback bonus, but never the W-tap extra.
+            manager.restartSyntheticLegacySprint(bot);
+        }
     }
 
     private double getCombatMovementSpeed() {
@@ -981,27 +1128,104 @@ public final class BotMatchSession {
     }
 
     private void tryAttack() {
-        if (runningTicks < difficulty.getReactionTicks()) return;
+        tickAttackCadence();
+        if (this.pendingAttackTick >= 0) return;
+        if (this.ticks < this.itemSwitchReadyTick) return;
+
+        // Do not spend a click while the opponent is out of swing range: a real
+        // player only starts clicking once the target is actually in front of
+        // them. Range is re-checked again after the latency delay.
         if (!isWithinRange(difficulty.getSwingRange()) || !hasClearLineOfSight()) return;
 
-        boolean criticalRetry = this.legacyCritAttackReady;
+        boolean criticalRetry = this.legacyCritAttackReady
+                && this.ticks >= this.legacyCritReadyAtTick;
         if (!criticalRetry) {
-            attackProgress = Math.min(1.0, attackProgress + difficulty.getCps() / 20.0);
-            if (attackProgress < 1.0) return;
-            attackProgress -= 1.0;
+            if (this.attackProgress < 1.0D) return;
+            consumeAttackClick();
+        }
+
+        if (!this.isHoldingMeleeWeapon()) return;
+        if (ThreadLocalRandom.current().nextDouble() < difficulty.getMisclickChance()) {
+            scheduleAttack(0.0D, true, criticalRetry);
+            return;
         }
 
         double attackReach = rollAttackReach();
-        if (!isWithinRange(attackReach)) {
-            bot.swingMainHand();
+        if (!isWithinRange(attackReach) || !isTargetInView(attackReach)) {
+            scheduleAttack(0.0D, true, criticalRetry);
             return;
         }
-        if (!isTargetInView(attackReach)) {
-            bot.swingMainHand();
+        scheduleAttack(attackReach, false, criticalRetry);
+    }
+
+    private void tickAttackCadence() {
+        if (this.attackRatePerTick <= 0.0D) {
+            this.attackRatePerTick = sampleAttackRate();
+        }
+        this.attackProgress = Math.min(1.0D, this.attackProgress + this.attackRatePerTick);
+    }
+
+    private double sampleAttackRate() {
+        double cps = difficulty.getCps();
+        double jitter = difficulty.getClickJitter();
+        if (jitter > 0.0D) {
+            cps *= 1.0D + ThreadLocalRandom.current().nextDouble(-jitter, jitter);
+        }
+        cps = clamp(cps, 1.0D, 20.0D);
+        return cps / 20.0D;
+    }
+
+    private void consumeAttackClick() {
+        this.attackProgress = 0.0D;
+        this.attackRatePerTick = sampleAttackRate();
+    }
+
+    private void scheduleAttack(double reach, boolean swingOnly, boolean criticalRetry) {
+        int latency = Math.max(0, difficulty.getLatencyTicks());
+        this.pendingAttackReach = reach;
+        this.pendingAttackSwingOnly = swingOnly;
+        this.pendingAttackCritical = criticalRetry;
+        this.pendingAttackTick = this.ticks + latency;
+        if (latency <= 0) tickPendingAttack();
+    }
+
+    /**
+     * Executes a click only after the simulated one-way latency. At that point the
+     * server re-validates the target, so a moving opponent can make the delayed
+     * click miss, just like a real high-ping client.
+     */
+    private void tickPendingAttack() {
+        if (this.pendingAttackTick < 0 || this.ticks < this.pendingAttackTick) return;
+
+        double reach = this.pendingAttackReach;
+        boolean swingOnly = this.pendingAttackSwingOnly;
+        boolean criticalRetry = this.pendingAttackCritical;
+        this.pendingAttackTick = -1;
+        this.pendingAttackSwingOnly = false;
+        this.pendingAttackCritical = false;
+
+        if (this.ended || this.bot == null || !this.bot.isValid() || this.bot.isDead()) return;
+
+        // A hotbar switch that happened during the latency window invalidates
+        // the click: the client would have attacked with the new item.
+        boolean canAttack = !swingOnly
+                && this.ticks >= this.itemSwitchReadyTick
+                && isHoldingMeleeWeapon()
+                && isWithinRange(reach)
+                && hasClearLineOfSight()
+                && isTargetInView(reach);
+        if (!canAttack) {
+            this.bot.swingMainHand();
+            if (criticalRetry) this.legacyCritAttackReady = false;
             return;
         }
         attackAsPlayer();
         if (criticalRetry) this.legacyCritAttackReady = false;
+    }
+
+    private boolean isHoldingMeleeWeapon() {
+        String name = this.bot.getInventory().getItemInMainHand().getType().name();
+        return name.endsWith("_SWORD") || name.endsWith("_AXE");
     }
 
     /**
@@ -1011,16 +1235,29 @@ public final class BotMatchSession {
      */
     private void updateLegacyKnockbackCritWindow() {
         if (!usesLegacyBotMovement()) return;
+        if (this.legacyCritArmedAtTick == Integer.MIN_VALUE) return;
+        if (this.ticks < this.legacyCritArmedAtTick) return;
+
         if (this.ticks > this.legacyCritWindowUntilTick || bot.isOnGround()
                 || bot.isInWater() || bot.isClimbing()) {
             this.legacyCritWindowUntilTick = 0;
+            this.legacyCritArmedAtTick = Integer.MIN_VALUE;
+            this.legacyCritReadyAtTick = Integer.MIN_VALUE;
             this.legacyCritAttackReady = false;
+            this.legacyCritRolled = false;
             return;
         }
 
+        if (this.legacyCritRolled) return;
         Vector velocity = bot.getVelocity();
         if (velocity.getY() < 0.0D && bot.getFallDistance() > 0.0F) {
-            this.legacyCritAttackReady = true;
+            // Roll once per knockback window: a human does not land every crit.
+            this.legacyCritRolled = true;
+            if (ThreadLocalRandom.current().nextDouble() < difficulty.getCritChance()) {
+                this.legacyCritReadyAtTick = this.ticks
+                        + ThreadLocalRandom.current().nextInt(0, 2);
+                this.legacyCritAttackReady = true;
+            }
         }
     }
 
@@ -1035,9 +1272,14 @@ public final class BotMatchSession {
                 && knockbackProfile != null
                 && (manager.hasLegacySprintKnockback(bot) || hasKnockbackEnchant);
         Vector velocityBeforeAttack = applyLegacySlowdown ? bot.getVelocity().clone() : null;
-        boolean useWTap = difficulty.isWTap()
+        // W-tap is a Legacy-only mechanic: it grants the 1_8 profile's wtap_extra
+        // through LegacySprintTracker, so other branches must not stutter for it.
+        boolean useWTap = usesLegacyBotMovement()
+                && difficulty.isWTap() && isInActiveTrade()
                 && ThreadLocalRandom.current().nextDouble() < difficulty.getWTapRate();
         this.pendingWTap = useWTap;
+        this.attackAcceptedThisSwing = false;
+        this.wtapAppliedThisSwing = false;
 
         data.setServerSideHit(true);
         try {
@@ -1047,21 +1289,43 @@ public final class BotMatchSession {
         }
         // Entity damage events raised by ServerPlayer#attack are synchronous.
         // A marker left behind here belongs to a failed swing, not a later hit.
+        boolean accepted = this.attackAcceptedThisSwing;
         this.pendingWTap = false;
         if (velocityBeforeAttack != null) {
+            // A ServerPlayer already received the engine's vanilla 0.6 attacker
+            // cut when i > 0. The old code multiplied by the profile value on
+            // top of that, so each click cost 0.36 of the Bot's motion and it
+            // crawled. Detect whether the engine actually cut, and only then
+            // normalise the result to exactly before * configured.
             Vector current = bot.getVelocity();
-            double slowdown = knockbackProfile.getLegacyAttackerHorizontalSlowdown();
-            bot.setVelocity(new Vector(
-                    velocityBeforeAttack.getX() * slowdown,
-                    current.getY(),
-                    velocityBeforeAttack.getZ() * slowdown));
+            double beforeHorizontal = Math.hypot(
+                    velocityBeforeAttack.getX(), velocityBeforeAttack.getZ());
+            double currentHorizontal = Math.hypot(current.getX(), current.getZ());
+            boolean engineCut = beforeHorizontal > 1.0E-6D
+                    && currentHorizontal > 1.0E-6D
+                    && currentHorizontal < beforeHorizontal * 0.995D;
+            if (engineCut) {
+                double target = beforeHorizontal
+                        * knockbackProfile.getLegacyAttackerHorizontalSlowdown();
+                if (Math.abs(currentHorizontal - target) > 1.0E-4D) {
+                    double scale = target / currentHorizontal;
+                    bot.setVelocity(new Vector(
+                            current.getX() * scale, current.getY(), current.getZ() * scale));
+                }
+            }
         }
-        if (shouldStartBotBlockHit(useWTap)) startBotBlockHit();
-        if (!useWTap && !ended) {
-            if (usesLegacyBotMovement() && applyLegacySlowdown) {
-                // Keep full W input so NMS accelerates naturally from the 0.6
-                // attacker slowdown, but do not restore sprint immediately.
-                beginLegacyMovementRecovery(false, false);
+        // W-tap and block-hit are mutually exclusive: releasing W and slowing the
+        // Bot to the block-hit movement scale at the same time used to stack into
+        // an almost stationary Bot in the middle of the path.
+        if (accepted && !this.wtapAppliedThisSwing && shouldStartBlockHit()) {
+            scheduleBotBlockHit();
+        }
+        if (!this.wtapAppliedThisSwing && !ended) {
+            if (usesLegacyBotMovement()) {
+                // 1.8 halves the attacker's motion and clears sprint only when
+                // the hit was accepted and i > 0. A rejected click (hurt window)
+                // leaves sprint and eligibility intact.
+                if (accepted && applyLegacySlowdown) beginLegacyMovementRecovery(false, false);
             } else {
                 rearmBotSprint();
             }
@@ -1071,11 +1335,23 @@ public final class BotMatchSession {
 
     public void confirmBotAttack() {
         if (this.debug) this.acceptedAttackSequence = this.attackAttemptSequence;
-        boolean useWTap = this.pendingWTap;
+        boolean requestedWTap = this.pendingWTap;
         this.pendingWTap = false;
-        if (!useWTap || ended || bot == null || nativeBot == null) return;
-        this.wTapReleaseUntilNanos = System.nanoTime()
-                + difficulty.getWTapReactionTimeMs() * 1_000_000L;
+        this.attackAcceptedThisSwing = true;
+        if (!requestedWTap || ended || bot == null || nativeBot == null) return;
+        if (!isInActiveTrade()) return;
+        if (this.blockHitActive || this.pendingBlockHitStartTick >= 0) return;
+        if (this.lastWTapTick != Integer.MIN_VALUE
+                && this.ticks - this.lastWTapTick < WTAP_MIN_INTERVAL_TICKS) return;
+
+        // A W-tap releases W for a tick or two, never for the full reaction-time
+        // budget: an over-long release is what made the Bot stall mid-path.
+        int releaseTicks = Math.min(WTAP_MAX_RELEASE_TICKS,
+                Math.max(1, difficulty.getWTapReactionTimeMs() / 50));
+        this.lastWTapTick = this.ticks;
+        this.wtapAppliedThisSwing = true;
+        this.wtapReArmPending = true;
+        this.wTapReleaseUntilTick = this.ticks + releaseTicks;
         setBotSprinting(false);
         if (usesLegacyBotMovement()) {
             initializeLegacyMovement();
@@ -1087,23 +1363,67 @@ public final class BotMatchSession {
         nativeBot.clearMovementInput();
     }
 
+    /**
+     * A W-tap only makes sense inside an actual trade: the Bot was hit recently
+     * or the opponent is close enough to hit back. Sprint-resetting in open
+     * space just makes the Bot stutter without changing the knockback.
+     */
+    private boolean isInActiveTrade() {
+        if (this.lastBotDamagedTick != Integer.MIN_VALUE
+                && this.ticks - this.lastBotDamagedTick <= TRADE_WINDOW_TICKS) {
+            return true;
+        }
+        double distanceSquared = bot.getLocation().distanceSquared(player.getLocation());
+        return distanceSquared <= TRADE_DISTANCE_SQUARED && isOpponentFacingBot();
+    }
+
+    private boolean isOpponentFacingBot() {
+        Vector look = player.getLocation().getDirection().setY(0.0D);
+        Vector towardBot = bot.getLocation().toVector()
+                .subtract(player.getLocation().toVector()).setY(0.0D);
+        if (look.lengthSquared() < 1.0E-8D || towardBot.lengthSquared() < 1.0E-8D) return false;
+        return look.normalize().dot(towardBot.normalize()) > 0.35D;
+    }
+
     private boolean isWTapReleasing() {
-        return System.nanoTime() < this.wTapReleaseUntilNanos;
+        return this.ticks < this.wTapReleaseUntilTick;
     }
 
     private double rollAttackReach() {
         double minimum = difficulty.getMinReach();
         double maximum = difficulty.getMaxReach();
         if (maximum - minimum < 1.0E-6D) return maximum;
-        return ThreadLocalRandom.current().nextDouble(minimum, maximum);
+        // Triangular distribution with its mode at the minimum: most clicks land
+        // close and only a few reach the configured maximum.
+        double first = ThreadLocalRandom.current().nextDouble();
+        double second = ThreadLocalRandom.current().nextDouble();
+        return minimum + (maximum - minimum) * Math.min(first, second);
     }
 
-    private boolean shouldStartBotBlockHit(boolean wTapThisAttack) {
+    private boolean shouldStartBlockHit() {
         if (!usesLegacyBotMovement() || !difficulty.isBlockHit() || this.blockHitActive) return false;
+        if (isWTapReleasing()) return false;
 
         boolean closeTrade = bot.getLocation().distanceSquared(player.getLocation()) <= 6.25D;
-        return (closeTrade || wTapThisAttack)
-                && ThreadLocalRandom.current().nextDouble() < BLOCK_HIT_TRIGGER_RATE;
+        return closeTrade && ThreadLocalRandom.current().nextDouble() < difficulty.getBlockHitRate();
+    }
+
+    private void scheduleBotBlockHit() {
+        if (this.pendingBlockHitStartTick >= 0 || isWTapReleasing()) return;
+        this.pendingBlockHitStartTick = this.ticks
+                + ThreadLocalRandom.current().nextInt(0, 2);
+    }
+
+    private void tickPendingBlockHit() {
+        if (this.pendingBlockHitStartTick < 0
+                || this.ticks < this.pendingBlockHitStartTick) return;
+        this.pendingBlockHitStartTick = -1;
+        // Never start a block-hit inside a W-tap release or a knockback flinch:
+        // both reduce movement input and together made the Bot look frozen.
+        if (this.blockHitActive || this.pausedForOpponent || isWTapReleasing()
+                || !usesLegacyBotMovement()) return;
+        if (this.ticks < this.legacyInputRecoveryTick) return;
+        startBotBlockHit();
     }
 
     private void startBotBlockHit() {
@@ -1114,7 +1434,9 @@ public final class BotMatchSession {
         this.blockHitUntilTick = this.ticks + BLOCK_HIT_USE_TICKS;
         this.blockHitMovementScale = approach(this.blockHitMovementScale,
                 BLOCK_HIT_MOVEMENT_SCALE, BLOCK_HIT_MOVEMENT_STEP);
-        setBotSprinting(false);
+        // finishBotBlockHit arms the W-tap extra explicitly; a tracker stop here
+        // would count the same reset twice and inflate the next hit's knockback.
+        dropBotSprint();
         this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
                 this.ticks + this.legacySprintRestartDelayTicks);
         legacyCombat.setBlocking(bot.getUniqueId(), true);
@@ -1126,6 +1448,7 @@ public final class BotMatchSession {
     }
 
     private void tickBotBlockHit() {
+        tickPendingBlockHit();
         if (this.blockHitActive && (!usesLegacyBotMovement() || this.ticks >= this.blockHitUntilTick)) {
             finishBotBlockHit();
         }
@@ -1136,6 +1459,7 @@ public final class BotMatchSession {
     }
 
     private void finishBotBlockHit() {
+        this.pendingBlockHitStartTick = -1;
         if (!this.blockHitActive) return;
 
         boolean completedReset = this.ticks >= this.blockHitUntilTick;
@@ -1170,25 +1494,63 @@ public final class BotMatchSession {
     }
 
     private Location getAimTarget() {
-        Location eye = player.getEyeLocation().clone();
-        BoundingBox box = player.getBoundingBox();
+        AimSnapshot snapshot = getPerceivedAimSnapshot();
+        Location eye = snapshot.eye().clone();
+        BoundingBox box = snapshot.box();
         double eyeY = clamp(eye.getY(), box.getMinY(), box.getMaxY());
         double chestY = Math.min(eyeY, box.getMinY() + box.getHeight() * 0.72D);
-        double aimY = chestY >= eyeY
-                ? eyeY
-                : ThreadLocalRandom.current().nextDouble(chestY, eyeY);
+
+        if (this.ticks >= this.nextAimHeightChangeTick) {
+            this.aimHeightTargetFraction =
+                    ThreadLocalRandom.current().nextDouble(0.72D, 1.0D);
+            this.nextAimHeightChangeTick = this.ticks
+                    + ThreadLocalRandom.current().nextInt(4, 11);
+        }
+        this.aimHeightFraction = approach(
+                this.aimHeightFraction, this.aimHeightTargetFraction, 0.12D);
+        double aimY = clamp(
+                box.getMinY() + box.getHeight() * this.aimHeightFraction, chestY, eyeY);
+
         double error = difficulty.getAimError();
-        eye.add(random(error), 0.0D, random(error));
-        eye.setY(clamp(aimY + random(error * 0.2D), chestY, eyeY));
+        double smoothing = difficulty.getAimSmoothing();
+        // Keep the steady-state noise amplitude comparable to the old white-noise
+        // model while correlating it across ticks, so smoothing changes the shape
+        // of the aim path rather than secretly making the Bot more accurate.
+        double fresh = Math.sqrt(Math.max(0.0D, 1.0D - smoothing * smoothing));
+        this.aimOffsetX = this.aimOffsetX * smoothing + random(error) * fresh;
+        this.aimOffsetZ = this.aimOffsetZ * smoothing + random(error) * fresh;
+        this.aimOffsetY = this.aimOffsetY * smoothing + random(error * 0.2D) * fresh;
+
+        eye.add(this.aimOffsetX, 0.0D, this.aimOffsetZ);
+        eye.setY(clamp(aimY + this.aimOffsetY, chestY, eyeY));
         return eye;
+    }
+
+    private void recordAimSnapshot() {
+        this.aimHistory.addLast(new AimSnapshot(
+                player.getEyeLocation().clone(), player.getBoundingBox().clone()));
+        while (this.aimHistory.size() > AIM_HISTORY_SIZE) {
+            this.aimHistory.removeFirst();
+        }
+    }
+
+    private AimSnapshot getPerceivedAimSnapshot() {
+        if (this.aimHistory.isEmpty()) {
+            return new AimSnapshot(player.getEyeLocation().clone(), player.getBoundingBox().clone());
+        }
+        int offset = Math.min(Math.max(0, difficulty.getLatencyTicks()),
+                this.aimHistory.size() - 1);
+        Iterator<AimSnapshot> iterator = this.aimHistory.descendingIterator();
+        AimSnapshot snapshot = iterator.next();
+        for (int index = 0; index < offset && iterator.hasNext(); index++) {
+            snapshot = iterator.next();
+        }
+        return snapshot;
     }
 
     private void faceTarget(Location target) {
         Vector direction = target.toVector().subtract(bot.getEyeLocation().toVector());
         if (direction.lengthSquared() < 1.0E-8D) return;
-
-        Location rotation = bot.getLocation();
-        rotation.setDirection(direction);
         nativeBot.face(target, (float) difficulty.getAimSpeed());
     }
 
@@ -1594,6 +1956,8 @@ public final class BotMatchSession {
     }
 
     private void interruptForPriorityHealing() {
+        this.pendingAttackTick = -1;
+        this.pendingBlockHitStartTick = -1;
         finishBotBlockHit();
         boolean restoreWeapon = this.buildingSlot >= 0 || this.holdingRod;
         if (this.foodSlot >= 0) finishFoodUse(false);
@@ -1649,7 +2013,7 @@ public final class BotMatchSession {
             int useTicks = Math.max(1, (int) (consumable.consumeSeconds() * 20.0F));
             this.foodSlot = holdItem(slot);
             this.foodFinishTick = this.ticks + useTicks;
-            setBotSprinting(false);
+            dropBotSprint();
             setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
             startUsingHeldItem(useTicks);
             bot.updateInventory();
@@ -1675,7 +2039,7 @@ public final class BotMatchSession {
             return;
         }
 
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.foodFinishTick) {
             keepUsingHeldItem(this.foodFinishTick - this.ticks + 1);
@@ -1726,7 +2090,7 @@ public final class BotMatchSession {
         this.goldenAppleFinishTick = this.ticks + GOLDEN_APPLE_USE_TICKS;
         this.nextBowTick = this.ticks + 20;
         this.nextRodTick = this.ticks + 20;
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(GOLDEN_APPLE_USE_TICKS);
         bot.updateInventory();
@@ -1740,7 +2104,7 @@ public final class BotMatchSession {
             return;
         }
 
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.goldenAppleFinishTick) {
             keepUsingHeldItem(Math.min(GOLDEN_APPLE_USE_TICKS,
@@ -1792,7 +2156,7 @@ public final class BotMatchSession {
         this.bowSlot = holdItem(bowSlot);
         this.bowReleaseTick = this.ticks + BOW_CHARGE_TICKS;
         this.chargingBow = bow == null ? null : bow.clone();
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(BOW_USE_DURATION_TICKS);
         bot.updateInventory();
@@ -1806,7 +2170,7 @@ public final class BotMatchSession {
             return;
         }
 
-        setBotSprinting(false);
+        dropBotSprint();
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         Location origin = bot.getEyeLocation();
         nativeBot.face(origin.clone().add(solveArrowVelocity(origin, getBowArrowSpeed())),
@@ -1964,18 +2328,36 @@ public final class BotMatchSession {
     }
 
     private int holdItem(int slot) {
+        int previousSlot = bot.getInventory().getHeldItemSlot();
+        ItemStack previousItem = bot.getInventory().getItemInMainHand().clone();
+
+        int heldSlot;
         if (slot <= 8) {
             bot.getInventory().setHeldItemSlot(slot);
             syncHeldItem();
-            return slot;
+            heldSlot = slot;
+        } else {
+            int hotbarSlot = 1;
+            ItemStack hotbarItem = bot.getInventory().getItem(hotbarSlot);
+            bot.getInventory().setItem(hotbarSlot, bot.getInventory().getItem(slot));
+            bot.getInventory().setItem(slot, hotbarItem);
+            bot.getInventory().setHeldItemSlot(hotbarSlot);
+            syncHeldItem();
+            heldSlot = hotbarSlot;
         }
-        int hotbarSlot = 1;
-        ItemStack hotbarItem = bot.getInventory().getItem(hotbarSlot);
-        bot.getInventory().setItem(hotbarSlot, bot.getInventory().getItem(slot));
-        bot.getInventory().setItem(slot, hotbarItem);
-        bot.getInventory().setHeldItemSlot(hotbarSlot);
-        syncHeldItem();
-        return hotbarSlot;
+
+        ItemStack heldItem = bot.getInventory().getItemInMainHand();
+        if (previousSlot != heldSlot || !sameItem(previousItem, heldItem)) {
+            this.itemSwitchReadyTick = this.ticks + difficulty.getSwitchDelayTicks();
+        }
+        return heldSlot;
+    }
+
+    private boolean sameItem(ItemStack first, ItemStack second) {
+        boolean firstEmpty = first == null || first.getType().isAir();
+        boolean secondEmpty = second == null || second.getType().isAir();
+        if (firstEmpty || secondEmpty) return firstEmpty && secondEmpty;
+        return first.isSimilar(second);
     }
 
     private void syncBotEquipment() {
@@ -2075,6 +2457,8 @@ public final class BotMatchSession {
         ended = true;
         running = false;
         if (task != null) task.cancel();
+        this.pendingAttackTick = -1;
+        this.pendingBlockHitStartTick = -1;
         finishBotBlockHit();
         if (bot != null) stopUsingHeldItem();
         if (nativeBot != null) nativeBot.stopMoving();
@@ -2229,9 +2613,8 @@ public final class BotMatchSession {
         AlleyPlugin.getInstance().getService(HotbarService.class)
                 .applyHotbarItems(player, queued ? HotbarType.QUEUE
                         : (party == null ? HotbarType.LOBBY : HotbarType.PARTY));
-        // No Play Again paper after a bot match — the player returns to the lobby
-        // without a requeue shortcut.
-        // Bot对局结束后不发放"再来一局"纸——玩家直接返回大厅。
+        // Play Again is handed out by the match itself; this only clears leftover
+        // arena items. The paper itself survives via PlayerUtil.reset.
         AlleyPlugin.getInstance().getService(VisibilityService.class).updateVisibility(player);
         AlleyPlugin.getInstance().getService(MusicService.class).startMusic(player);
     }
@@ -2335,5 +2718,8 @@ public final class BotMatchSession {
 
     public UUID getBotId() {
         return bot == null ? null : bot.getUniqueId();
+    }
+
+    private record AimSnapshot(Location eye, BoundingBox box) {
     }
 }
