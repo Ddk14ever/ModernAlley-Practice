@@ -30,6 +30,7 @@ public enum VisualsLocaleImpl implements LocaleEntry {
     ACTIONBAR_DEATH_MESSAGE_FORMAT("providers/visuals.yml", "action-bars.death-message.format", "&c&lKILL! &f{victim-name-color}{victim}"),
 
     TAB_LIST_ENABLED_BOOLEAN("providers/tab-list.yml", "tab-list.enabled", true),
+    TAB_LIST_LEGACY_DISPLAY_SLOTS("providers/tab-list.yml", "tab-list.legacy.display-slots", 20),
     TAB_LIST_HEADER("providers/tab-list.yml", "tab-list.header", Arrays.asList("", "&6&lAlley Network", "")),
     TAB_LIST_FOOTER("providers/tab-list.yml", "tab-list.footer", Arrays.asList("", "&fPlaying with &6&lAlley &fdeveloped by &6&lEmmy &f& &6&lRemi", "")),
 

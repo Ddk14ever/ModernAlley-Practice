@@ -80,7 +80,6 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         // Tick loop for packet delay queue
         AlleyPlugin.getInstance().getServer().getScheduler().runTaskTimer(AlleyPlugin.getInstance(), () -> {
             currentTick++;
-            if (hitDetection != null) hitDetection.tick();
             if (legacySprintTracker != null) legacySprintTracker.tick();
             if (misplaceHandler != null) misplaceHandler.tick();
         }, 1L, 1L);
@@ -110,6 +109,15 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
             YamlConfiguration config = YamlConfiguration.loadConfiguration(f);
             boolean configChanged = false;
             boolean hitDelayMigrated = false;
+            // Remove the retired server re-attack switch from existing profiles.
+            if (config.isSet("melee.anti_whiff")) {
+                config.set("melee.anti_whiff", null);
+                if (config.isConfigurationSection("melee")
+                        && config.getConfigurationSection("melee").getKeys(false).isEmpty()) {
+                    config.set("melee", null);
+                }
+                configChanged = true;
+            }
             KnockbackBranch inferredBranch = name.equalsIgnoreCase("1_8")
                     ? KnockbackBranch.LEGACY : KnockbackBranch.DEFAULT;
             KnockbackBranch configuredBranch = KnockbackBranch.fromName(config.getString("branch"));
@@ -141,8 +149,6 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 configChanged |= setIfMissing(config, "arrow.vertical_limit", 0.4D);
                 configChanged |= setIfMissing(config, "arrow.punch_horizontal", 0.6D);
                 configChanged |= setIfMissing(config, "arrow.punch_vertical", 0.1D);
-                // Surface the anti-whiff switch in existing server configs too.
-                configChanged |= setIfMissing(config, "melee.anti_whiff", true);
             }
             if (!config.isSet(HIT_DELAY_FORMAT_KEY)) {
                 int legacyDelay = Math.max(0, config.getInt("hit_delay", 10));

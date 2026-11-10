@@ -10,7 +10,7 @@
 
     <name>Alley</name>
     <description>A modern practice core built from the ground and up</description>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 
     <developers>
         <developer>
@@ -36,6 +36,7 @@
     </properties>
 
     <build>
+        <finalName>${project.artifactId}-${project.version}</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

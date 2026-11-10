@@ -1,5 +1,14 @@
 tab-list:
   enabled: true
+  # These settings control the custom header/footer for 1.8+ clients only.
+  # 1.7 always uses real player names with colors, without extra rows or text.
+  # Old legacy.enabled/order-prefix settings are ignored; fake rows are removed.
+  legacy:
+    # 1.7 draws a fixed grid from the login packet's capacity, even for empty slots.
+    # 20 = one wide column; 40 = two wide columns. Supported range: 1-40.
+    # This limits visible Tab names, NOT actual server player capacity.
+    # Changes take effect after restart and client reconnect.
+    display-slots: 20
   header:
     - ''
     - '&6&lAlley Network'

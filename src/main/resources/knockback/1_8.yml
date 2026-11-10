@@ -70,12 +70,6 @@ packet:
   delay:
     enabled: false
     ticks: 2
-melee:
-  # Server-side re-attack when the client resolved a hit but no damage event
-  # reached the server (anti-whiff). This is an Alley addition, not vanilla
-  # 1.8. When enabled the retry is still re-validated against the 3.0 reach
-  # and block occlusion. Set false for strictly vanilla 1.8 melee.
-  anti_whiff: false
 modern:
   cooldown_affects_kb: false
   # Legacy melee reach, measured as eye -> hitbox intersection and hard-capped

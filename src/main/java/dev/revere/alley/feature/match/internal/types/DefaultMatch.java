@@ -228,12 +228,10 @@ public class DefaultMatch extends Match {
             );
         }
 
-        // Give the Play Again papers right after the result: winner keeps slot 1
-        // (second hotbar slot), loser keeps slot 0. They survive the return-to-lobby
-        // inventory wipe so clicking one queues instantly.
-        // 发布结果后立刻发放"再来一局"纸：胜者占物品栏第2格(1)，败者占第1格(0)。
-        // 返回大厅清空物品栏时纸会被保留，点击即可立即排队。
-        givePlayAgainPapers(winner, loser);
+        // Give both papers two ticks later, after death inventory cleanup.
+        // Winner keeps slot 1; loser keeps slot 0.
+        this.plugin.getServer().getScheduler().runTaskLater(this.plugin,
+                () -> givePlayAgainPapers(winner, loser), 2L);
 
         // Start MVP music now, then reveal the MVP after the result title has been visible.
         this.announceMVP(40L);
@@ -271,17 +269,14 @@ public class DefaultMatch extends Match {
         boolean botMatch = this.getBotDifficultyId() != null;
         if (!botMatch && this.getQueue() == null) return;
 
-        org.bukkit.inventory.ItemStack paper = this.createPlayAgainItem();
-        if (paper == null) return;
-
         Player winnerPlayer = winner.getLeader().getTeamPlayer();
         if (isHumanParticipant(winnerPlayer)) {
-            winnerPlayer.getInventory().setItem(1, paper.clone());
+            this.giveResultPlayAgainItem(winnerPlayer, 1);
         }
 
         Player loserPlayer = loser.getLeader().getTeamPlayer();
         if (isHumanParticipant(loserPlayer)) {
-            loserPlayer.getInventory().setItem(0, paper.clone());
+            this.giveResultPlayAgainItem(loserPlayer, 0);
         }
     }
 

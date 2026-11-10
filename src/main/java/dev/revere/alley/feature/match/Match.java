@@ -67,6 +67,7 @@ import dev.revere.alley.feature.match.task.mode.PlatformDecayTask;
 import dev.revere.alley.feature.match.task.other.MatchCampProtectionTask;
 import dev.revere.alley.feature.match.task.other.MatchRespawnTask;
 import dev.revere.alley.feature.match.utility.MatchResultFlight;
+import dev.revere.alley.feature.match.utility.MatchRespawnHealth;
 import dev.revere.alley.feature.music.MusicService;
 import dev.revere.alley.feature.queue.Queue;
 import dev.revere.alley.feature.queue.listener.PlayAgainListener;
@@ -703,11 +704,7 @@ public abstract class Match {
             return;
         }
 
-        Scoreboard scoreboard = player.getScoreboard();
-        if (scoreboard.equals(this.plugin.getServer().getScoreboardManager().getMainScoreboard())) {
-            scoreboard = this.plugin.getServer().getScoreboardManager().getNewScoreboard();
-            player.setScoreboard(scoreboard);
-        }
+        Scoreboard scoreboard = dev.revere.alley.library.assemble.utility.PlayerScoreboards.get(player);
 
         Objective objective = scoreboard.getObjective("showhealth");
         if (objective == null) {
@@ -929,13 +926,13 @@ public abstract class Match {
 
             this.state = MatchState.ENDING_MATCH;
 
-            // Phase 1: Play Again paper 0.1s after match end
+            // Delay both result papers by two additional ticks (2 -> 4).
             final Player winner = killer;
             final Player loser = victim;
             org.bukkit.Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
                 giveResultPlayAgainItem(winner, 1);
                 giveResultPlayAgainItem(loser, 0);
-            }, 2L);
+            }, 4L);
         }
 
         return true;
@@ -961,7 +958,7 @@ public abstract class Match {
         killer.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 60, 237, false, false, false), true);
     }
 
-    private void giveResultPlayAgainItem(Player player, int slot) {
+    protected void giveResultPlayAgainItem(Player player, int slot) {
         if (player == null || !player.isOnline()) return;
 
         Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
@@ -1647,6 +1644,7 @@ public abstract class Match {
      */
     public void startRespawnProcess(Player player) {
         player.setGameMode(GameMode.SPECTATOR);
+        MatchRespawnHealth.restore(player);
         player.setAllowFlight(true);
         player.setFlying(true);
 

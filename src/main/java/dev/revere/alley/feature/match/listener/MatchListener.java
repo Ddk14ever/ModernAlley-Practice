@@ -166,6 +166,9 @@ public class MatchListener implements Listener {
                     Match currentMatch = currentProfile == null ? null : currentProfile.getMatch();
                     MatchGamePlayer gamePlayer = currentMatch == null
                             ? null : currentMatch.getFromAllGamePlayers(player);
+                    if (currentMatch != null && player.getGameMode() == GameMode.SPECTATOR) {
+                        dev.revere.alley.feature.match.utility.MatchRespawnHealth.restore(player);
+                    }
                     if (gamePlayer != null && (gamePlayer.isDead() || gamePlayer.isEliminated())) return;
 
                     clearDeadPlayerPickupBlock(player);

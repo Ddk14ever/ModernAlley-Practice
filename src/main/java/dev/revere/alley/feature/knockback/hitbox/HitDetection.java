@@ -18,11 +18,8 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -42,8 +39,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HitDetection implements Listener {
     private final KnockbackManager manager;
     private final Map<UUID, Integer> lastSwingTick = new ConcurrentHashMap<>();
-    private final Map<UUID, PendingFallback> pendingFallbacks = new ConcurrentHashMap<>();
-    private final Map<UUID, AcceptedHit> acceptedHits = new ConcurrentHashMap<>();
 
     public HitDetection(KnockbackManager manager) {
         this.manager = manager;
@@ -66,22 +61,7 @@ public class HitDetection implements Listener {
         Integer lastTick = lastSwingTick.put(attacker.getUniqueId(), currentTick);
         if (lastTick != null && lastTick == currentTick) return;
 
-        detectAndAttack(attacker, profile, currentTick);
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMeleeAttack(EntityDamageByEntityEvent event) {
-        if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
-        if (!(event.getDamager() instanceof Player attacker)
-                || !(event.getEntity() instanceof Player victim)) return;
-
-        int currentTick = Bukkit.getCurrentTick();
-        acceptedHits.put(attacker.getUniqueId(), new AcceptedHit(victim.getUniqueId(), currentTick));
-        PendingFallback pending = pendingFallbacks.get(attacker.getUniqueId());
-        if (pending != null && pending.target().getUniqueId().equals(victim.getUniqueId())
-                && currentTick >= pending.swingTick()) {
-            pendingFallbacks.remove(attacker.getUniqueId());
-        }
+        detectAndAttack(attacker, profile);
     }
 
     @EventHandler
@@ -94,7 +74,7 @@ public class HitDetection implements Listener {
 
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
-        clearPendingSwing(event.getPlayer().getUniqueId());
+        clearPlayer(event.getPlayer().getUniqueId());
     }
 
     @EventHandler
@@ -107,59 +87,15 @@ public class HitDetection implements Listener {
         clearPlayer(event.getPlayer().getUniqueId());
     }
 
-    /** Runs from KnockbackManager's existing single tick task. */
-    public void tick() {
-        int currentTick = Bukkit.getCurrentTick();
-        acceptedHits.entrySet().removeIf(entry -> currentTick - entry.getValue().tick() > 1);
-
-        for (Map.Entry<UUID, PendingFallback> entry : pendingFallbacks.entrySet()) {
-            PendingFallback pending = entry.getValue();
-            if (currentTick <= pending.swingTick()) continue;
-            if (!pendingFallbacks.remove(entry.getKey(), pending)) continue;
-
-            Player attacker = pending.attacker();
-            Player target = pending.target();
-            if (!isUsableAttacker(attacker) || !isUsableTarget(target)
-                    || attacker.getWorld() != target.getWorld()) continue;
-
-            AcceptedHit accepted = acceptedHits.get(attacker.getUniqueId());
-            if (accepted != null && accepted.targetId().equals(target.getUniqueId())
-                    && accepted.tick() >= pending.swingTick()) continue;
-            if (manager.isInsideHurtResistanceWindow(target)) continue;
-
-            KnockbackProfile profile = manager.getAppliedProfile(attacker);
-            if (profile == null) continue;
-
-            // The fallback is a server-side re-attack for a click the client could
-            // not resolve. It must be re-validated against the target's CURRENT
-            // position: one tick of knockback/retreat is enough to move 0.3+ blocks,
-            // which used to let this "anti-whiff" path land hits well beyond the
-            // 1.8 three-block reach.
-            RayContext context = createRayContext(attacker, profile);
-            if (context == null) continue;
-            RayHit hit = resolveHit(attacker, target, profile, context);
-            if (hit == null) continue;
-            if (isBlocked(context.eye(), hit.position())) continue;
-
-            fireAttack(attacker, target, profile);
-        }
-    }
-
     public void clearPlayer(UUID playerId) {
-        clearPendingSwing(playerId);
-        acceptedHits.remove(playerId);
-        pendingFallbacks.entrySet().removeIf(entry ->
-                entry.getValue().target().getUniqueId().equals(playerId));
-        acceptedHits.entrySet().removeIf(entry -> entry.getValue().targetId().equals(playerId));
+        lastSwingTick.remove(playerId);
     }
 
     public void clear() {
         lastSwingTick.clear();
-        pendingFallbacks.clear();
-        acceptedHits.clear();
     }
 
-    private void detectAndAttack(Player attacker, KnockbackProfile profile, int currentTick) {
+    private void detectAndAttack(Player attacker, KnockbackProfile profile) {
         RayContext context = createRayContext(attacker, profile);
         if (context == null) return;
 
@@ -188,19 +124,9 @@ public class HitDetection implements Listener {
         Location eye = context.eye();
         if (closest == null || closestHit == null || isBlocked(eye, closestHit)) return;
 
-        if (vanillaHit) {
-            // Anti-whiff is an Alley extra, not vanilla 1.8; it can be disabled
-            // per profile (knockback/*.yml -> melee.anti_whiff).
-            if (!profile.isMeleeAntiWhiff()) return;
-            // Do not turn a genuine 1.8 hurt-window empty click into a delayed hit.
-            if (manager.isInsideHurtResistanceWindow(closest)) return;
-            AcceptedHit accepted = acceptedHits.get(attacker.getUniqueId());
-            if (accepted != null && accepted.targetId().equals(closest.getUniqueId())
-                    && accepted.tick() == currentTick) return;
-            pendingFallbacks.put(attacker.getUniqueId(),
-                    new PendingFallback(attacker, closest, currentTick));
-            return;
-        }
+        // A hit inside the vanilla box belongs to the client's normal attack.
+        // Only the configured/legacy hitbox extension needs a server attack.
+        if (vanillaHit) return;
 
         fireAttack(attacker, closest, profile);
     }
@@ -318,7 +244,7 @@ public class HitDetection implements Listener {
         return Math.max(0.0D, Math.min(3.0D, profile.getEntityInteractionRange()));
     }
 
-    /** Per-swing ray state shared by the immediate hit and the delayed fallback. */
+    /** Per-swing ray state shared by all candidate hitbox intersections. */
     private record RayContext(Location eye, Ray ray, AABB expandedBox, AABB vanillaBox,
                               double maxDistance, boolean legacyMelee) {
     }
@@ -330,11 +256,6 @@ public class HitDetection implements Listener {
     private boolean isUsableTarget(Player player) {
         return player != null && player.isValid() && !player.isDead()
                 && player.getGameMode() != GameMode.SPECTATOR;
-    }
-
-    private boolean isUsableAttacker(Player player) {
-        return isUsableTarget(player)
-                && isMeleeWeapon(player.getInventory().getItemInMainHand().getType());
     }
 
     private boolean hasLegacySwordCombat(Player player) {
@@ -356,11 +277,4 @@ public class HitDetection implements Listener {
         };
     }
 
-    private void clearPendingSwing(UUID playerId) {
-        lastSwingTick.remove(playerId);
-        pendingFallbacks.remove(playerId);
-    }
-
-    private record PendingFallback(Player attacker, Player target, int swingTick) { }
-    private record AcceptedHit(UUID targetId, int tick) { }
 }

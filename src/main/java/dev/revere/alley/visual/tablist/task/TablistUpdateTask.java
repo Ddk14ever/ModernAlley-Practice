@@ -22,7 +22,12 @@ public class TablistUpdateTask extends BukkitRunnable {
     @Override
     public void run() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            this.tablistAdapterVisualizer.update(player);
+            try {
+                this.tablistAdapterVisualizer.update(player);
+            } catch (Exception exception) {
+                AlleyPlugin.getInstance().getLogger().log(java.util.logging.Level.WARNING,
+                        "Unable to update tab list for " + player.getName(), exception);
+            }
         }
     }
 }

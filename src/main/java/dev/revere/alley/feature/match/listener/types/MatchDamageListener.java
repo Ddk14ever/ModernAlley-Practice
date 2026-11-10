@@ -18,6 +18,8 @@ import dev.revere.alley.feature.kit.setting.types.visual.KitSettingHealthBar;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.match.utility.MatchRespawnHealth;
+import org.bukkit.GameMode;
 import dev.revere.alley.feature.event.skywars.SkyWarsMatch;
 import dev.revere.alley.feature.match.internal.types.HideAndSeekMatch;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
@@ -56,11 +58,19 @@ public class MatchDamageListener implements Listener {
         Player player = (Player) event.getEntity();
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
+        if (profile == null) return;
 
         if (profile.getState() == ProfileState.SPECTATING) event.setCancelled(true);
         if (profile.getState() == ProfileState.PLAYING) {
             Match match = profile.getMatch();
             if (match == null) return;
+            // Respawn countdown players remain PLAYING and clear their dead
+            // flag. Spectator mode must protect them from void/environment hits.
+            if (player.getGameMode() == GameMode.SPECTATOR) {
+                event.setCancelled(true);
+                MatchRespawnHealth.restore(player);
+                return;
+            }
             if (match instanceof SkyWarsMatch skyWarsMatch && skyWarsMatch.isProtectionActive()) {
                 event.setCancelled(true);
                 return;

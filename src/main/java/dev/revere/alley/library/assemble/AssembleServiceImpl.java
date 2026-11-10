@@ -5,12 +5,14 @@ import dev.revere.alley.library.assemble.enums.AssembleStyle;
 import dev.revere.alley.library.assemble.events.AssembleBoardCreateEvent;
 import dev.revere.alley.library.assemble.events.AssembleBoardDestroyEvent;
 import dev.revere.alley.library.assemble.listener.AssembleListener;
+import dev.revere.alley.library.assemble.utility.LegacyGlyphs;
 import dev.revere.alley.core.config.ConfigService;
 import dev.revere.alley.bootstrap.AlleyContext;
 import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.common.animation.AnimationService;
 import dev.revere.alley.common.logger.Logger;
+import dev.revere.alley.common.version.ClientVersionService;
 import lombok.Getter;
 import lombok.Setter;
 import org.bukkit.Bukkit;
@@ -31,6 +33,7 @@ public class AssembleServiceImpl implements AssembleService {
     private final AnimationService animationService;
     private final ProfileService profileService;
     private final ConfigService configService;
+    private final ClientVersionService clientVersionService;
 
     private final Map<UUID, AssembleBoard> boards = new ConcurrentHashMap<>();
     private final Map<UUID, AssembleBoard> pendingBoardRemovals = new ConcurrentHashMap<>();
@@ -39,6 +42,7 @@ public class AssembleServiceImpl implements AssembleService {
     private AssembleAdapter adapter;
     private AssembleThread thread;
     private AssembleListener listeners;
+    private LegacyScoreboardPacketTrace packetTrace;
     private AssembleStyle assembleStyle = AssembleStyle.MODERN;
 
     private boolean hook;
@@ -46,11 +50,13 @@ public class AssembleServiceImpl implements AssembleService {
     private boolean callEvents = true;
     private long ticks = 2;
 
-    public AssembleServiceImpl(AlleyPlugin plugin, AnimationService animationService, ProfileService profileService, ConfigService configService) {
+    public AssembleServiceImpl(AlleyPlugin plugin, AnimationService animationService, ProfileService profileService,
+                               ConfigService configService, ClientVersionService clientVersionService) {
         this.plugin = plugin;
         this.animationService = animationService;
         this.profileService = profileService;
         this.configService = configService;
+        this.clientVersionService = clientVersionService;
     }
 
     @Override
@@ -59,6 +65,9 @@ public class AssembleServiceImpl implements AssembleService {
 
         this.listeners = new AssembleListener(this);
         this.plugin.getServer().getPluginManager().registerEvents(this.listeners, this.plugin);
+
+        LegacyGlyphs legacyGlyphs = LegacyGlyphs.shared();
+        applyGlyphOverrides(legacyGlyphs);
 
         for (Player player : this.plugin.getServer().getOnlinePlayers()) {
             if (this.callEvents) {
@@ -69,13 +78,62 @@ public class AssembleServiceImpl implements AssembleService {
             this.boards.putIfAbsent(player.getUniqueId(), new AssembleBoard(player, this));
         }
 
-        this.thread = new AssembleThread(this);
+        boolean traceLegacy = false;
+        try {
+            traceLegacy = this.configService.getScoreboardConfig() != null
+                    && this.configService.getScoreboardConfig()
+                            .getBoolean("scoreboard.legacy-glyphs.debug", false);
+        } catch (RuntimeException ignored) {
+            // Diagnostics must never break startup.
+        }
+        this.thread = new AssembleThread(this, this.clientVersionService, legacyGlyphs, traceLegacy);
+        long updatePeriod = Math.max(1L, this.ticks);
+        this.thread.runTaskTimer(this.plugin, 0L, updatePeriod);
+
+        boolean tracePackets = this.configService.getScoreboardConfig()
+                .getBoolean("scoreboard.legacy-glyphs.packet-trace", false);
+        this.plugin.getLogger().info("[LegacySidebar] renderer=teams-v4 diagnostic="
+                + this.configService.getScoreboardConfig().getString("scoreboard.legacy-diagnostic", "off")
+                + " debug=" + traceLegacy + " packetTrace=" + tracePackets);
+        if (tracePackets) {
+            // Modern packets before Via rewriting; opt-in and rate limited.
+            try {
+                this.packetTrace = new LegacyScoreboardPacketTrace(this.clientVersionService);
+                this.packetTrace.enable();
+            } catch (Throwable ignored) {
+                this.packetTrace = null;
+            }
+        }
+    }
+
+    /**
+     * Loads the optional 1.7 glyph override table from the scoreboard config.
+     * 从记分板配置读取可选的 1.7 字形覆盖表。
+     */
+    private void applyGlyphOverrides(LegacyGlyphs legacyGlyphs) {
+        try {
+            org.bukkit.configuration.file.FileConfiguration config = this.configService.getScoreboardConfig();
+            if (config == null || !config.getBoolean("scoreboard.legacy-glyphs.enabled", true)) {
+                return;
+            }
+            org.bukkit.configuration.ConfigurationSection section =
+                    config.getConfigurationSection("scoreboard.legacy-glyphs.replacements");
+            if (section == null) return;
+
+            java.util.Map<String, String> overrides = new java.util.LinkedHashMap<>();
+            for (String key : section.getKeys(false)) {
+                overrides.put(key, section.getString(key));
+            }
+            legacyGlyphs.applyOverrides(overrides);
+        } catch (RuntimeException ignored) {
+            // A malformed override table must never break the scoreboard.
+        }
     }
 
     @Override
     public void shutdown(AlleyContext context) {
         if (this.thread != null) {
-            this.thread.interrupt();
+            this.thread.cancel();
             this.thread = null;
         }
 
@@ -84,12 +142,12 @@ public class AssembleServiceImpl implements AssembleService {
             this.listeners = null;
         }
 
-        for (UUID uuid : this.boards.keySet()) {
-            Player player = Bukkit.getPlayer(uuid);
-            if (player != null && player.isOnline()) {
-                player.setScoreboard(Bukkit.getScoreboardManager().getNewScoreboard());
-            }
+        if (this.packetTrace != null) {
+            this.packetTrace.disable();
+            this.packetTrace = null;
         }
+
+        this.boards.values().forEach(AssembleBoard::clearSidebar);
         this.boards.clear();
         this.pendingBoardRemovals.clear();
         Logger.info("Assemble scoreboard has been shut down.");
@@ -97,6 +155,14 @@ public class AssembleServiceImpl implements AssembleService {
 
     @Override
     public void createBoard(Player player) {
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(this.plugin, () -> {
+                if (player.isOnline() && Bukkit.getPlayer(player.getUniqueId()) == player) createBoard(player);
+            });
+            return;
+        }
+        AssembleBoard previous = this.boards.get(player.getUniqueId());
+        if (previous != null && previous.getPlayer() == player) return;
         if (isCallEvents()) {
             AssembleBoardCreateEvent createEvent = new AssembleBoardCreateEvent(player);
             Bukkit.getPluginManager().callEvent(createEvent);
@@ -104,6 +170,7 @@ public class AssembleServiceImpl implements AssembleService {
                 return;
             }
         }
+        if (previous != null) previous.clearSidebar();
         this.boards.put(player.getUniqueId(), new AssembleBoard(player, this));
     }
 
@@ -111,7 +178,9 @@ public class AssembleServiceImpl implements AssembleService {
     public void removeBoard(Player player) {
         UUID playerId = player.getUniqueId();
         AssembleBoard expectedBoard = this.boards.get(playerId);
-        if (expectedBoard == null) return;
+        // A delayed quit from an old connection must not delete the new
+        // connection's sidebar when both have the same UUID.
+        if (expectedBoard == null || expectedBoard.getPlayer() != player) return;
 
         if (!Bukkit.isPrimaryThread()) {
             if (!this.plugin.isEnabled()
@@ -150,11 +219,7 @@ public class AssembleServiceImpl implements AssembleService {
             }
         }
         if (!this.boards.remove(playerId, expectedBoard)) return;
-        try {
-            if (player.isOnline() && player.getScoreboard() != null) {
-                player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-            }
-        } catch (Exception ignored) {}
+        expectedBoard.clearSidebar();
     }
 
     @Override

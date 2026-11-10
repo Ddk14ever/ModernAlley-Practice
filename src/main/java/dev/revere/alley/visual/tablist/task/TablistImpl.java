@@ -2,8 +2,8 @@ package dev.revere.alley.visual.tablist.task;
 
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.common.PlaceholderUtil;
-import dev.revere.alley.common.logger.Logger;
 import dev.revere.alley.common.text.CC;
+import dev.revere.alley.common.version.ClientVersionService;
 import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.VisualsLocaleImpl;
 import dev.revere.alley.core.profile.ProfileService;
@@ -64,21 +64,33 @@ public class  TablistImpl implements TablistAdapter {
 
     @Override
     public void update(Player player) {
-        if (AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId()).getProfileData().getSettingData().isTablistEnabled()) {
-            List<String> headerLines = getHeader(player).stream()
-                    .map(CC::translate)
-                    .collect(Collectors.toList());
+        // LegacyTablist owns 1.7 name colors independently of custom Tab settings.
+        // Never turn header/footer lines (including blanks) into player entries.
+        ClientVersionService versions = this.plugin.getService(ClientVersionService.class);
+        if (versions.isLegacy17(player)) return;
 
-            List<String> footerLines = getFooter(player).stream()
-                    .map(CC::translate)
-                    .collect(Collectors.toList());
-
-            Component headerComponent = SERIALIZER.deserialize(String.join("\n", headerLines));
-            Component footerComponent = SERIALIZER.deserialize(String.join("\n", footerLines));
-
-            player.sendPlayerListHeaderAndFooter(headerComponent, footerComponent);
-        } else {
+        dev.revere.alley.core.profile.Profile profile = this.plugin.getService(ProfileService.class)
+                .getProfiles().get(player.getUniqueId());
+        if (profile == null || profile.getProfileData() == null
+                || profile.getProfileData().getSettingData() == null) return;
+        boolean enabled = profile.getProfileData().getSettingData().isTablistEnabled();
+        if (!enabled) {
             player.sendPlayerListHeaderAndFooter(Component.empty(), Component.empty());
+            return;
         }
+
+        List<String> headerLines = getHeader(player).stream()
+                .map(CC::translate)
+                .collect(Collectors.toList());
+
+        List<String> footerLines = getFooter(player).stream()
+                .map(CC::translate)
+                .collect(Collectors.toList());
+
+        Component headerComponent = SERIALIZER.deserialize(String.join("\n", headerLines));
+        Component footerComponent = SERIALIZER.deserialize(String.join("\n", footerLines));
+
+        player.sendPlayerListHeaderAndFooter(headerComponent, footerComponent);
     }
+
 }

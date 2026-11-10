@@ -4,6 +4,10 @@ import dev.revere.alley.common.logger.Logger;
 import dev.revere.alley.common.reflect.Reflection;
 import dev.revere.alley.common.reflect.internal.types.DefaultReflectionImpl;
 import dev.revere.alley.visual.nametag.internal.NametagServiceImpl;
+import dev.revere.alley.library.assemble.utility.PlayerScoreboards;
+import dev.revere.alley.library.assemble.utility.AssembleUtility;
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.common.version.ClientVersionService;
 import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -58,25 +62,29 @@ public class NametagAdapter {
      *        接收数据包的玩家。
      */
     public void sendCreationPacket(Player player) {
-        Scoreboard board = player.getScoreboard();
-        if (board == null) {
-            board = Bukkit.getScoreboardManager().getNewScoreboard();
-            player.setScoreboard(board);
-        }
+        Scoreboard board = PlayerScoreboards.get(player);
 
         Team team = board.getTeam(this.name);
         if (team == null) {
             team = board.registerNewTeam(this.name);
         }
 
-        team.setDisplayName(this.name);
-        team.setPrefix(this.prefix);
-        team.setSuffix(this.suffix);
+        ClientVersionService versions = AlleyPlugin.getInstance().getService(ClientVersionService.class);
+        boolean legacy = versions != null && versions.isLegacy113(player);
+        boolean legacy17 = versions != null && versions.isLegacy17(player);
+        applyTeamAppearance(team, legacy, legacy17);
+    }
 
-        // Also color the team itself so the player's tablist entry matches the in-world
-        // nametag color (a plain prefix alone does not recolor the tablist entry).
+    void applyTeamAppearance(Team team, boolean legacy, boolean legacy17) {
+        team.setDisplayName(this.name);
+        team.setPrefix(legacy ? AssembleUtility.truncateLegacy(this.prefix, 16) : this.prefix);
+        team.setSuffix(legacy ? AssembleUtility.truncateLegacy(this.suffix, 16) : this.suffix);
+
+        // ViaRewind 4.1.3's 1.8 -> 1.7 team-color update selects a color-specific
+        // sidebar, sending an empty objective when none exists. Keep the default
+        // team color for 1.7 viewers; the legacy prefix still colors the nametag.
         ChatColor teamColor = parseTeamColor(this.prefix);
-        if (teamColor != null) {
+        if (!legacy17 && teamColor != null && team.getColor() != teamColor) {
             team.setColor(teamColor);
         }
 
@@ -108,7 +116,7 @@ public class NametagAdapter {
      *        需要看到此变更的观察者玩家。
      */
     public void addPlayer(Player player, Player viewer) {
-        Scoreboard board = viewer.getScoreboard();
+        Scoreboard board = PlayerScoreboards.get(viewer);
         if (board == null) return;
 
         Team team = board.getTeam(this.name);

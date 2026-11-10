@@ -1,7 +1,7 @@
 package dev.revere.alley.library.assemble;
 
+import dev.revere.alley.library.assemble.utility.AssembleUtility;
 import lombok.Setter;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
@@ -9,11 +9,11 @@ import org.bukkit.scoreboard.Team;
 @Setter
 public class AssembleBoardEntry {
     private static final LegacyComponentSerializer LEGACY_SERIALIZER = LegacyComponentSerializer.legacySection();
-
     private final AssembleBoard board;
     private final String identifier;
     private String text;
     private Team team;
+    private Scoreboard scoreboard;
 
     /**
      * Assemble Board Entry
@@ -61,6 +61,7 @@ public class AssembleBoardEntry {
         }
 
         this.team = team;
+        this.scoreboard = scoreboard;
     }
 
     /**
@@ -71,19 +72,38 @@ public class AssembleBoardEntry {
      *        条目的位置。
      */
     public void send(int position) {
-        this.team.prefix(LEGACY_SERIALIZER.deserialize(this.text));
-        this.team.suffix(Component.empty());
+        send(position, AssembleUtility.MODERN_TEAM_TEXT_LIMIT);
+    }
 
-        this.board.getObjective().getScore(this.identifier).setScore(position);
-        // Hide the red score numbers (Paper 1.20.3+ API)
-        try {
-            this.board.getObjective().numberFormat(
-                    io.papermc.paper.scoreboard.numbers.NumberFormat.blank());
-        } catch (Exception ignored) {}
+    /**
+     * Send the board entry update, splitting the line into the team prefix and
+     * suffix so it survives the legacy 16-character half limit.
+     *
+     * <p>Before 1.13 each of prefix and suffix holds at most 16 characters
+     * including colour codes; a longer sidebar line has to continue in the
+     * suffix or the client truncates it.</p>
+     *
+     * @param position    of entry.
+     *                    条目的位置。
+     * @param prefixLimit maximum raw length of each half for this client.
+     *                    该客户端每个半段的最大原始长度。
+     */
+    public void send(int position, int prefixLimit) {
+        String[] parts = AssembleUtility.splitTeamText(this.text, prefixLimit);
+        net.kyori.adventure.text.Component prefix = LEGACY_SERIALIZER.deserialize(parts[0]);
+        net.kyori.adventure.text.Component suffix = LEGACY_SERIALIZER.deserialize(parts[1]);
+        if (!this.team.prefix().equals(prefix)) this.team.prefix(prefix);
+        if (!this.team.suffix().equals(suffix)) this.team.suffix(suffix);
+
+        org.bukkit.scoreboard.Score score = this.board.getObjective().getScore(this.identifier);
+        if (!score.isScoreSet() || score.getScore() != position) score.setScore(position);
     }
 
     public void remove() {
         this.board.getIdentifiers().remove(this.identifier);
-        this.board.getScoreboard().resetScores(this.identifier);
+        this.board.getEntries().remove(this);
+        if (this.scoreboard == null) return;
+        this.scoreboard.resetScores(this.identifier);
+        if (this.team != null && this.team.getScoreboard() != null) this.team.unregister();
     }
 }

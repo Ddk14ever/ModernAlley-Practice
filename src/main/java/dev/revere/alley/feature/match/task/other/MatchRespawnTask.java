@@ -9,6 +9,11 @@ import dev.revere.alley.core.locale.internal.impl.VisualsLocaleImpl;
 import dev.revere.alley.core.locale.internal.impl.message.GameMessagesLocaleImpl;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
+import dev.revere.alley.core.profile.enums.ProfileState;
+import dev.revere.alley.feature.match.utility.MatchRespawnHealth;
+import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -44,14 +49,26 @@ public class MatchRespawnTask extends BukkitRunnable {
 
     @Override
     public void run() {
-        if (this.count == 0) {
+        // Check ownership/state before count==0: a stale timer must not revive
+        // someone after the match ended or after they entered another match.
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfiles().get(this.player.getUniqueId());
+        if (!this.player.isOnline() || profile == null || profile.getMatch() != this.match
+                || profile.getState() != ProfileState.PLAYING
+                || this.player.getGameMode() != GameMode.SPECTATOR
+                || (this.match.getState() != MatchState.RUNNING && this.match.getState() != MatchState.STARTING)) {
             this.cancel();
-            this.match.handleRespawn(this.player);
             return;
         }
 
-        if (this.match.getState() == MatchState.ENDING_MATCH || this.match.getState() == MatchState.ENDING_ROUND) {
+        MatchRespawnHealth.restore(this.player);
+        // The native-death safety net completes on the next tick. Do not revive
+        // a dead entity by setting health or consume its waiting countdown yet.
+        if (this.player.isDead()) return;
+
+        if (this.count <= 0) {
             this.cancel();
+            this.match.handleRespawn(this.player);
             return;
         }
 

@@ -43,12 +43,32 @@ public class AssembleAdapterImpl implements AssembleAdapter {
     }
 
     @Override
+    public boolean isReady(Player player) {
+        Profile profile = this.profileService.getProfiles().get(player.getUniqueId());
+        return profile != null && profile.getProfileData() != null
+                && profile.getProfileData().getSettingData() != null && profile.getState() != null;
+    }
+
+    private String diagnosticMode(Player player) {
+        dev.revere.alley.common.version.ClientVersionService versions = AlleyPlugin.getInstance()
+                .getService(dev.revere.alley.common.version.ClientVersionService.class);
+        String mode = versions != null && versions.isLegacy17(player)
+                ? this.configService.getScoreboardConfig().getString("scoreboard.legacy-diagnostic", "off")
+                : "off";
+        // YAML 1.1 interprets an unquoted 'off' as boolean false.
+        return mode != null && List.of("ascii", "colors", "long", "unicode")
+                .contains(mode.toLowerCase(java.util.Locale.ROOT)) ? mode : "off";
+    }
+
+    @Override
     public String getTitle(Player player) {
+        if (!isReady(player)) return "";
         Profile profile = this.profileService.getProfile(player.getUniqueId());
         if (profile == null || profile.getProfileData() == null) return "";
         if (!profile.getProfileData().getSettingData().isScoreboardEnabled()) {
             return "";
         }
+        if (!"off".equalsIgnoreCase(diagnosticMode(player))) return "Legacy sidebar test";
         String title = this.animationService.getAnimation(ScoreboardTitleAnimation.class, AnimationType.CONFIG).getText();
         if (AlleyPlugin.getInstance().getService(dev.revere.alley.feature.staff.StaffModeManager.class).isStaff(player)) {
             title += CC.translate(" &7STAFF");
@@ -67,10 +87,27 @@ public class AssembleAdapterImpl implements AssembleAdapter {
      */
     @Override
     public List<String> getLines(Player player) {
+        if (!isReady(player)) return Collections.emptyList();
         Profile profile = this.profileService.getProfile(player.getUniqueId());
         if (profile == null || profile.getProfileData() == null) return Collections.emptyList();
 
         if (profile.getProfileData().getSettingData().isScoreboardEnabled()) {
+
+            String diagnostic = diagnosticMode(player);
+            if (!"off".equalsIgnoreCase(diagnostic)) {
+                List<String> test = new ArrayList<>(List.of("Sidebar OK", "Player: " + player.getName(),
+                        "Tick: " + player.getTicksLived() / 20, "", "", "Last row"));
+                if ("colors".equalsIgnoreCase(diagnostic) || "long".equalsIgnoreCase(diagnostic)
+                        || "unicode".equalsIgnoreCase(diagnostic)) {
+                    test.add("&aGreen &lbold &rplain");
+                }
+                if ("long".equalsIgnoreCase(diagnostic) || "unicode".equalsIgnoreCase(diagnostic)) {
+                    test.add("1234567890123456789012345678901234567890");
+                    test.add("&c12345678901234&lBOLD continuation");
+                }
+                if ("unicode".equalsIgnoreCase(diagnostic)) test.add("中文 ᴘʀᴀᴄᴛɪᴄᴇ │ ❤");
+                return test;
+            }
 
             if (profile.getState() == ProfileState.EDITING) {
                 return Collections.emptyList();

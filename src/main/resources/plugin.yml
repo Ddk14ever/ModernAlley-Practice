@@ -7,4 +7,6 @@ description: '${project.description}'
 website: https://discord.gg/revere
 softdepend:
   - PlaceholderAPI
+  - ViaVersion
+  - ViaRewind
 depend: [ FastAsyncWorldEdit, ProtocolLib ]

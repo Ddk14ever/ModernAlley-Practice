@@ -1,6 +1,27 @@
 scoreboard:
   enabled: true
+  # 1.7-only test stages: off, ascii, colors, long, unicode. Restart after changing.
+  # Uses the production sidebar renderer; restore off after testing.
+  # 仅 1.7：依次验证纯 ASCII、颜色、长文本、Unicode，测试后改回 off 并重启。
+  legacy-diagnostic: 'off'
   sidebar-format: "&7&m-----------------------"
+  # 1.7's default font cannot render the small-caps letters (ᴘʀᴀᴄᴛɪᴄᴇ) and box
+  # glyphs (│ ┃ ■) used in this file, showing them as empty boxes. These
+  # replacements apply to 1.7 clients only; 1.8+ is untouched.
+  # 1.7 默认字体无法显示本文件使用的小型大写字母与制表符，会显示成方块。
+  # 以下替换仅对 1.7 客户端生效，1.8+ 不受影响。
+  legacy-glyphs:
+    enabled: true
+    # Logs the detected client protocol for pre-1.13 players on join. Use this to
+    # confirm ViaRewind is reporting the client version correctly.
+    # 玩家加入时输出检测到的客户端协议号（仅 <1.13），用于确认跨版本识别是否正确。
+    debug: false
+    # Optional modern packet trace BEFORE Via translation, limited to 20 details / 10s.
+    # debug 只输出每名玩家的侧栏摘要；包日志需单独开启，且自动限流。
+    packet-trace: false
+    # Optional per-character overrides, e.g. "ᴘ": "P"
+    # 可选逐字符覆盖
+    replacements: {}
   team-displays:
     red: "&c&l[R] &fRed"
     blue: "&9&l[B] &fBlue"

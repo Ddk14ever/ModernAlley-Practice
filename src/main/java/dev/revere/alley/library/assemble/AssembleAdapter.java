@@ -6,6 +6,11 @@ import java.util.List;
 
 public interface AssembleAdapter {
 
+    /** False while content is unavailable; retain the last rendered board. */
+    default boolean isReady(Player player) {
+        return true;
+    }
+
     /**
      * Get's the scoreboard title.
      * 获取记分板标题。

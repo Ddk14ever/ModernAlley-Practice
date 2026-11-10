@@ -1,5 +1,6 @@
 package dev.revere.alley.library.assemble;
 
+import dev.revere.alley.common.version.ClientVersionService;
 import dev.revere.alley.library.assemble.events.AssembleBoardCreatedEvent;
 import lombok.Getter;
 import org.bukkit.Bukkit;
@@ -21,6 +22,8 @@ public class AssembleBoard {
     private final List<String> identifiers;
 
     private final UUID uuid;
+    private final Player player;
+    private Scoreboard attachedScoreboard;
 
     /**
      * Assemble Board.
@@ -36,6 +39,7 @@ public class AssembleBoard {
         this.entries = new ArrayList<>();
         this.identifiers = new ArrayList<>();
         this.uuid = player.getUniqueId();
+        this.player = player;
         this.setup(player);
     }
 
@@ -47,12 +51,26 @@ public class AssembleBoard {
      *         现有的记分板或新的记分板。
      */
     public Scoreboard getScoreboard() {
-        Player player = Bukkit.getPlayer(getUuid());
-        if (this.assembleServiceImpl.isHook() || player.getScoreboard() != Bukkit.getScoreboardManager().getMainScoreboard()) {
-            return player.getScoreboard();
+        Scoreboard scoreboard = this.assembleServiceImpl.isHook() ? player.getScoreboard()
+                : dev.revere.alley.library.assemble.utility.PlayerScoreboards.get(player);
+        if (this.attachedScoreboard != scoreboard) {
+            boolean replaced = this.attachedScoreboard != null;
+            clearSidebar();
+            this.attachedScoreboard = scoreboard;
+            if (replaced && this.assembleServiceImpl.isCallEvents()) {
+                Bukkit.getPluginManager().callEvent(new AssembleBoardCreatedEvent(this));
+            }
         }
+        return scoreboard;
+    }
 
-        return Bukkit.getScoreboardManager().getNewScoreboard();
+    /** Remove only our sidebar, preserving nametag teams and health objectives. */
+    public void clearSidebar() {
+        while (!this.entries.isEmpty()) this.entries.get(this.entries.size() - 1).remove();
+        if (this.attachedScoreboard != null) {
+            Objective objective = this.attachedScoreboard.getObjective("Assemble");
+            if (objective != null) objective.unregister();
+        }
     }
 
     /**
@@ -64,14 +82,49 @@ public class AssembleBoard {
      */
     public Objective getObjective() {
         Scoreboard scoreboard = this.getScoreboard();
+        if (scoreboard == null) return null;
         if (scoreboard.getObjective("Assemble") == null) {
             Objective objective = scoreboard.registerNewObjective("Assemble", "dummy");
             objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-            objective.setDisplayName(getAssembleServiceImpl().getAdapter().getTitle(Bukkit.getPlayer(getUuid())));
+            AssembleAdapter adapter = getAssembleServiceImpl().getAdapter();
+            String title = adapter != null && adapter.isReady(player) ? adapter.getTitle(player) : "";
+            title = ChatColor.translateAlternateColorCodes('&', title == null ? "" : title);
+            ClientVersionService versions = this.assembleServiceImpl.getClientVersionService();
+            boolean legacy = versions != null && versions.isLegacy113(player);
+            if (legacy) {
+                if (versions.isLegacy17(player)) {
+                    title = dev.revere.alley.library.assemble.utility.LegacyGlyphs.shared().apply(title);
+                }
+                title = dev.revere.alley.library.assemble.utility.AssembleUtility
+                        .truncateLegacy(title, dev.revere.alley.library.assemble.utility.AssembleUtility.LEGACY_TITLE_LIMIT);
+            }
+            objective.setDisplayName(title);
+            // Number formats do not exist on legacy clients. Configure modern
+            // objectives once, at creation; API lookups can return new wrappers.
+            if (!legacy) blankScoreNumbers(objective);
             return objective;
         }
 
-        return scoreboard.getObjective("Assemble");
+        Objective existing = scoreboard.getObjective("Assemble");
+        if (existing != null && existing.getDisplaySlot() != DisplaySlot.SIDEBAR) {
+            existing.setDisplaySlot(DisplaySlot.SIDEBAR);
+        }
+        return existing;
+    }
+
+    /**
+     * Hides the red score numbers next to each sidebar line.
+     * 隐藏每行记分板旁的红色分数。
+     *
+     * <p>Paper 1.20.3+ API; missing on older servers, where the numbers simply
+     * stay visible. Set once per objective instead of once per line per tick.</p>
+     */
+    static void blankScoreNumbers(Objective objective) {
+        try {
+            objective.numberFormat(io.papermc.paper.scoreboard.numbers.NumberFormat.blank());
+        } catch (Throwable ignored) {
+            // Older Paper without the number-format API.
+        }
     }
 
     /**
@@ -82,6 +135,10 @@ public class AssembleBoard {
      *        要设置记分板的玩家。
      */
     private void setup(Player player) {
+        // Resolve client protocol before choosing legacy limits.
+        ClientVersionService versions = this.assembleServiceImpl.getClientVersionService();
+        if (versions != null) versions.getProtocol(player);
+
         Scoreboard scoreboard = getScoreboard();
         player.setScoreboard(scoreboard);
         this.getObjective();
