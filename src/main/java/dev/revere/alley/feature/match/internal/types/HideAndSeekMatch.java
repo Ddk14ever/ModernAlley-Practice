@@ -553,6 +553,7 @@ public class HideAndSeekMatch extends DefaultMatch {
 
         if (this.intermissionPhase || this.selectingRoles) {
             MatchGamePlayer gamePlayer = getGamePlayer(player);
+            this.playDeathFeedback(player, null);
             if (gamePlayer != null) MatchListener.blockDeadPlayerPickup(player);
             Player killer = this.plugin.getService(CombatService.class).getLastAttacker(player);
             this.announceDeath(player, killer, cause);
@@ -566,6 +567,7 @@ public class HideAndSeekMatch extends DefaultMatch {
             if (this.timeExpired) {
                 super.handleDeath(player, cause);
             } else {
+                this.playDeathFeedback(player, null);
                 if (gameEndTask != null) {
                     this.sendMessage(this.plugin.getService(LocaleService.class).getString(GameMessagesLocaleImpl.MATCH_SEEKER_RESPAWNED)
                             .replace("{player}", player.getName())

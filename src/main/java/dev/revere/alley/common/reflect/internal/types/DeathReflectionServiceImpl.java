@@ -1,127 +1,124 @@
 package dev.revere.alley.common.reflect.internal.types;
 
-import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketContainer;
-import com.comphenix.protocol.wrappers.WrappedDataWatcher;
-import com.comphenix.protocol.wrappers.EnumWrappers;
+import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.common.logger.Logger;
 import dev.revere.alley.common.reflect.Reflection;
-import dev.revere.alley.common.TaskUtil;
-import org.bukkit.entity.Entity;
+import dev.revere.alley.common.version.ClientVersionService;
+import dev.revere.alley.feature.bot.match.BotMatchSession;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * @author Emmy
- * @project Alley
- * @since 02/04/2025
- */
-public class DeathReflectionServiceImpl implements Reflection {
-    private final int FAKE_ENTITY_ID;
-    private final int VIEW_RADIUS;
-    private final ProtocolManager protocolManager;
+/** Client-only feedback for cancelled lethal damage; never kills the real player. */
+public final class DeathReflectionServiceImpl implements Reflection {
+    private final ProtocolManager protocolManager = ProtocolLibrary.getProtocolManager();
+    private final Map<UUID, Integer> lastFeedbackTick = new HashMap<>();
+    private final Set<Runnable> cleanups = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean warned = new AtomicBoolean();
 
-    public DeathReflectionServiceImpl() {
-        this.FAKE_ENTITY_ID = Integer.MAX_VALUE - 1;
-        this.VIEW_RADIUS = 64;
-        this.protocolManager = ProtocolLibrary.getProtocolManager();
-    }
-
-    /**
-     * Visualizes the death of a player by sending fake entity packets to nearby players.
-     * 通过向附近玩家发送假实体数据包来可视化玩家的死亡。
-     *
-     * @param player The supposedly dying player.
-     *               据称正在死亡的玩家。
-     */
-    public void animateDeath(Player player) {
-        Set<Player> playersInRange = this.getPlayersInRange(player);
-
-        for (Player watcher : playersInRange) {
-            sendFakeDeathAnimation(player, watcher);
+    /** The sound reaches nearby listeners; only the killer receives the corpse. */
+    public void animateDeath(Player victim, Player killer) {
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> animateDeath(victim, killer));
+            return;
         }
+        if (victim == null || !victim.isOnline() || victim.isDead()
+                || victim.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG)) return;
+        int tick = Bukkit.getCurrentTick();
+        lastFeedbackTick.entrySet().removeIf(entry -> entry.getValue() != tick);
+        if (lastFeedbackTick.put(victim.getUniqueId(), tick) != null) return;
 
-        TaskUtil.runLater(() -> this.removeFakeEntities(playersInRange), 40L);
-    }
-
-    private void sendFakeDeathAnimation(Player target, Player watcher) {
         try {
-            // Send fake named entity spawn
-            // 发送假的命名实体生成包
-            PacketContainer spawnPacket = protocolManager.createPacket(PacketType.Play.Server.NAMED_ENTITY_SPAWN);
-            spawnPacket.getIntegers().write(0, FAKE_ENTITY_ID);
-            spawnPacket.getUUIDs().write(0, target.getUniqueId());
-            spawnPacket.getDoubles()
-                .write(0, target.getLocation().getX())
-                .write(1, target.getLocation().getY())
-                .write(2, target.getLocation().getZ());
-            spawnPacket.getBytes()
-                .write(0, (byte) ((int) (target.getLocation().getYaw() * 256.0F / 360.0F)))
-                .write(1, (byte) ((int) (target.getLocation().getPitch() * 256.0F / 360.0F)));
+            Location location = victim.getLocation().clone();
+            victim.getWorld().playSound(location, Sound.ENTITY_PLAYER_HURT, 1.0F, 1.0F);
+            if (killer == null || killer.getUniqueId().equals(victim.getUniqueId())
+                    || !killer.isOnline() || killer.isDead() || !killer.canSee(victim)
+                    || killer.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG)
+                    || killer.getWorld() != victim.getWorld()) return;
 
-            protocolManager.sendServerPacket(watcher, spawnPacket);
-
-            // Send entity status (death = 3)
-            // 发送实体状态（死亡 = 3）
-            PacketContainer statusPacket = protocolManager.createPacket(PacketType.Play.Server.ENTITY_STATUS);
-            statusPacket.getIntegers().write(0, FAKE_ENTITY_ID);
-            statusPacket.getBytes().write(0, (byte) 3); // Death status
-                                                         // 死亡状态
-            protocolManager.sendServerPacket(watcher, statusPacket);
-
-            // Send metadata with health = 0 via ProtocolLib 5.x API
-            // 通过 ProtocolLib 5.x API 发送生命值为 0 的元数据
-            PacketContainer metadataPacket = protocolManager.createPacket(PacketType.Play.Server.ENTITY_METADATA);
-            metadataPacket.getIntegers().write(0, FAKE_ENTITY_ID);
-            List<com.comphenix.protocol.wrappers.WrappedWatchableObject> dataValues = new ArrayList<>();
-            WrappedDataWatcher watcher_dw = new WrappedDataWatcher();
-            watcher_dw.setObject(6, WrappedDataWatcher.Registry.get(Float.class), 0.0F);
-            dataValues.addAll(watcher_dw.getWatchableObjects());
-            metadataPacket.getWatchableCollectionModifier().write(0, dataValues);
-            protocolManager.sendServerPacket(watcher, metadataPacket);
-        } catch (Exception exception) {
-            Logger.logException("Failed to send death animation packet.", exception);
+            ClientVersionService versions = AlleyPlugin.getInstance().getService(ClientVersionService.class);
+            boolean legacy17 = versions.isLegacy17(killer);
+            DeathAnimationPackets animation = DeathAnimationPackets.create(victim, location, legacy17,
+                    versions.getProtocol(killer));
+            LegacyDeathProfile legacyProfile = legacy17
+                    ? LegacyDeathProfile.create(killer, animation.profile()) : null;
+            Executor connection = legacyProfile == null ? Runnable::run : legacyProfile::execute;
+            AtomicBoolean removed = new AtomicBoolean();
+            Runnable cleanup = new Runnable() {
+                @Override
+                public void run() {
+                    if (!removed.compareAndSet(false, true)) return;
+                    cleanups.remove(this);
+                    try {
+                        connection.execute(() -> {
+                            if (killer.isOnline()) {
+                                for (Object packet : animation.removal()) {
+                                    try {
+                                        send(killer, packet);
+                                    } catch (RuntimeException exception) {
+                                        warn(exception);
+                                    }
+                                }
+                            }
+                            try {
+                                if (legacyProfile != null) legacyProfile.remove();
+                            } catch (ReflectiveOperationException exception) {
+                                warn(exception);
+                            }
+                        });
+                    } catch (RuntimeException exception) {
+                        warn(exception);
+                    }
+                }
+            };
+            cleanups.add(cleanup);
+            try {
+                // Register cleanup before sending, including partially delivered spawns.
+                Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), cleanup, 20L);
+                connection.execute(() -> {
+                    if (removed.get() || !killer.isOnline()) return;
+                    try {
+                        if (legacyProfile != null) legacyProfile.install();
+                        for (Object packet : animation.spawn()) send(killer, packet);
+                    } catch (ReflectiveOperationException | RuntimeException exception) {
+                        cleanup.run();
+                        warn(exception);
+                    }
+                });
+            } catch (RuntimeException exception) {
+                cleanup.run();
+                throw exception;
+            }
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            warn(exception);
         }
     }
 
-    /**
-     * Retrieves a set of players within a certain radius of the player.
-     * 获取玩家周围一定半径内的一组玩家。
-     *
-     * @param player The player to check around.
-     *               要检查周围的玩家。
-     * @return A set of nearby players.
-     *         附近玩家的集合。
-     */
-    private Set<Player> getPlayersInRange(Player player) {
-        Set<Player> playersInRange = new HashSet<>();
-        for (Entity entity : player.getNearbyEntities(this.VIEW_RADIUS, this.VIEW_RADIUS, this.VIEW_RADIUS)) {
-            if (entity instanceof Player && !entity.getUniqueId().equals(player.getUniqueId())) {
-                playersInRange.add((Player) entity);
-            }
-        }
-        return playersInRange;
+    public void shutdown() {
+        List.copyOf(cleanups).forEach(Runnable::run);
+        lastFeedbackTick.clear();
     }
 
-    /**
-     * Removes the fake death entity from players' views.
-     * 从玩家的视野中移除假死亡实体。
-     *
-     * @param players The players to remove the fake entity for.
-     *                要为其移除假实体的玩家。
-     */
-    private void removeFakeEntities(Set<Player> players) {
-        try {
-            PacketContainer destroyPacket = protocolManager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
-            destroyPacket.getIntLists().write(0, List.of(FAKE_ENTITY_ID));
-            for (Player player : players) {
-                protocolManager.sendServerPacket(player, destroyPacket);
-            }
-        } catch (Exception exception) {
-            Logger.logException("Failed to destroy fake death entity.", exception);
-        }
+    private void send(Player viewer, Object packet) {
+        // Bypass plugin packet listeners; Via still translates the server protocol.
+        protocolManager.sendServerPacket(viewer, PacketContainer.fromPacket(packet), false);
+    }
+
+    private void warn(Exception exception) {
+        if (!warned.compareAndSet(false, true)) return;
+        Logger.logException("Could not show client-only death animation; synthetic respawn is unaffected.", exception);
     }
 }

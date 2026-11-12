@@ -155,6 +155,7 @@ public class RoundsMatch extends DefaultMatch {
         this.setScorer(lastAttacker == null ? opponent.getLeader().getUsername() : lastAttacker.getName());
 
         if (this.getKit().isSettingEnabled(KitSettingStickFight.class)) {
+            this.playDeathFeedback(player, null);
             if (participant instanceof TeamGameParticipant<?>) {
                 TeamGameParticipant<MatchGamePlayer> team = (TeamGameParticipant<MatchGamePlayer>) participant;
                 MatchGamePlayer gamePlayer = team.getPlayers().stream()

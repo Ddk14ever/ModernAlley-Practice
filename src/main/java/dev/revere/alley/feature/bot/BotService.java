@@ -23,6 +23,12 @@ public interface BotService extends Service {
 
     void endMatch(Player player, boolean playerWon);
 
+    /** Immediately closes the player's Bot session when leaving voluntarily. */
+    boolean leaveMatch(Player player);
+
+    /** Cleans up an ending Bot session before starting the requested rematch. */
+    boolean restartMatch(Player player, Kit kit, String difficultyId);
+
     /** Re-reads the bot difficulty profiles from providers/bots.yml (used by /alley reload). */
     void reloadProfiles();
 }

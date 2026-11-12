@@ -41,6 +41,7 @@ import dev.revere.alley.feature.match.internal.types.DefaultMatch;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.snapshot.SnapshotService;
+import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.feature.queue.Queue;
 import dev.revere.alley.feature.queue.QueueService;
 import dev.revere.alley.feature.music.MusicService;
@@ -158,6 +159,7 @@ public final class BotMatchSession {
     private Projectile activeRodProjectile;
     private boolean running;
     private boolean ended;
+    private boolean cleanedUp;
     private boolean forcingBotDeath;
     private boolean openingPotionsConsumed;
     private int ticks;
@@ -274,6 +276,8 @@ public final class BotMatchSession {
                 && !standalone.getSpawnReadyFuture().isDone()) {
             standalone.getSpawnReadyFuture().whenComplete((ignored, throwable) ->
                     Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+                        // Leaving while the arena is loading must not spawn a late Bot.
+                        if (this.ended || this.service.getSession(this.player) != this) return;
                         if (throwable != null || !this.player.isOnline()) {
                             if (this.player.isOnline()) {
                                 if (throwable != null) {
@@ -311,6 +315,11 @@ public final class BotMatchSession {
     }
 
     private boolean startInternal() {
+        Profile currentProfile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfile(player.getUniqueId());
+        if (this.ended || this.service.getSession(this.player) != this || !player.isOnline()
+                || currentProfile == null || currentProfile.getState() != ProfileState.LOBBY
+                || currentProfile.getMatch() != null || currentProfile.getQueueProfile() != null) return false;
         this.originalWalkSpeed = player.getWalkSpeed();
         PlayerUtil.reset(player, true, true);
         Profile humanProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
@@ -2425,6 +2434,7 @@ public final class BotMatchSession {
     }
 
     public void finish(boolean playerWon) {
+        if (this.ended) return;
         if (playerWon && beginNaturalBotDeath()) return;
         finish(playerWon, false);
     }
@@ -2457,6 +2467,10 @@ public final class BotMatchSession {
         ended = true;
         running = false;
         if (task != null) task.cancel();
+        // Arm cleanup before result cosmetics/messages, which may throw in hooks.
+        returnTask = Bukkit.getScheduler().runTaskLater(
+                AlleyPlugin.getInstance(), this::returnToLobby,
+                Math.max(returnDelayTicks, BOT_REMOVE_DELAY_TICKS));
         this.pendingAttackTick = -1;
         this.pendingBlockHitStartTick = -1;
         finishBotBlockHit();
@@ -2474,16 +2488,8 @@ public final class BotMatchSession {
                     this.bot.playEffect(EntityEffect.DEATH);
                 }
             }, DEATH_EFFECT_DELAY_TICKS);
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
-        } else if (playerWon) {
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
-        } else {
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
         }
-
-        returnTask = Bukkit.getScheduler().runTaskLater(
-                AlleyPlugin.getInstance(), this::returnToLobby,
-                Math.max(returnDelayTicks, BOT_REMOVE_DELAY_TICKS));
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
     }
 
     private void freezeBotForResults() {
@@ -2532,34 +2538,75 @@ public final class BotMatchSession {
     }
 
     private void returnToLobby() {
-        clearCombatSystems();
-        restoreBlocks();
-        cleanupBot();
-        if (this.matchContext != null) {
-            this.matchContext.endMatch();
-        } else {
-            restorePlayerToLobby();
-            deleteTemporaryArena();
-        }
-        service.complete(this);
-    }
-
-    public void abortStart() {
-        if (task != null) task.cancel();
-        ended = true;
+        if (!beginCleanup()) return;
         try {
-            runAbortCleanup("match context", this::discardMatchContext);
-            runAbortCleanup("combat state", this::clearCombatSystems);
-            runAbortCleanup("bot player", this::cleanupBot);
-            runAbortCleanup("changed blocks", this::restoreBlocks);
-            runAbortCleanup("player lobby state", this::restorePlayerToLobby);
-            runAbortCleanup("temporary arena", this::deleteTemporaryArena);
+            runCleanup("combat state", this::clearCombatSystems);
+            runCleanup("changed blocks", this::restoreBlocks);
+            runCleanup("bot player", this::cleanupBot);
+            if (this.matchContext != null) {
+                runCleanup("match context", this.matchContext::endMatch);
+            } else {
+                runCleanup("player lobby state", this::restorePlayerToLobby);
+                runCleanup("temporary arena", this::deleteTemporaryArena);
+            }
         } finally {
             service.complete(this);
         }
     }
 
-    private void runAbortCleanup(String step, Runnable cleanup) {
+    /** A voluntary leave skips the result display timer and returns immediately. */
+    public void leave() {
+        if (this.cleanedUp) return;
+        try {
+            if (!this.ended) {
+                if (this.matchContext != null) {
+                    Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                            .getProfile(player.getUniqueId());
+                    this.matchContext.sendMessage((profile == null ? player.getName() : profile.getFancyName())
+                            + " &fdisconnected.");
+                }
+                finish(false);
+            }
+        } finally {
+            runCleanup("player lobby state", this::restorePlayerToLobby);
+            returnToLobby();
+        }
+    }
+
+    /** Called after Play Again has released the human from the ending match. */
+    public boolean closeForRematch() {
+        if (!this.ended) return false;
+        returnToLobby();
+        return true;
+    }
+
+    private boolean beginCleanup() {
+        if (this.cleanedUp) return false;
+        this.cleanedUp = true;
+        this.ended = true;
+        this.running = false;
+        if (task != null) task.cancel();
+        if (returnTask != null) returnTask.cancel();
+        this.pendingAttackTick = -1;
+        this.pendingBlockHitStartTick = -1;
+        return true;
+    }
+
+    public void abortStart() {
+        if (!beginCleanup()) return;
+        try {
+            runCleanup("combat state", this::clearCombatSystems);
+            runCleanup("bot player", this::cleanupBot);
+            runCleanup("changed blocks", this::restoreBlocks);
+            runCleanup("player lobby state", this::restorePlayerToLobby);
+            runCleanup("match context", this::discardMatchContext);
+            runCleanup("temporary arena", this::deleteTemporaryArena);
+        } finally {
+            service.complete(this);
+        }
+    }
+
+    private void runCleanup(String step, Runnable cleanup) {
         try {
             cleanup.run();
         } catch (RuntimeException exception) {
@@ -2569,17 +2616,24 @@ public final class BotMatchSession {
     }
 
     public void shutdown() {
-        if (task != null) task.cancel();
-        if (returnTask != null) returnTask.cancel();
-        ended = true;
-        discardMatchContext();
-        clearCombatSystems();
-        cleanupBot();
-        restoreBlocks();
-        deleteTemporaryArena();
-        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
-        if (profile != null) profile.setState(ProfileState.LOBBY);
-        service.complete(this);
+        if (!beginCleanup()) return;
+        try {
+            runCleanup("combat state", this::clearCombatSystems);
+            runCleanup("bot player", this::cleanupBot);
+            runCleanup("changed blocks", this::restoreBlocks);
+            runCleanup("player lobby state", () -> {
+                Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                        .getProfile(player.getUniqueId());
+                if (profile != null && profile.getMatch() == this.matchContext) {
+                    profile.setMatch(null);
+                    profile.setState(ProfileState.LOBBY);
+                }
+            });
+            runCleanup("match context", this::discardMatchContext);
+            runCleanup("temporary arena", this::deleteTemporaryArena);
+        } finally {
+            service.complete(this);
+        }
     }
 
     private void discardMatchContext() {
@@ -2593,7 +2647,7 @@ public final class BotMatchSession {
         if (!player.isOnline()) return;
 
         Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
-        if (profile == null) return;
+        if (profile == null || profile.getMatch() != this.matchContext) return;
 
         // A player who clicked Play Again before returning was already released and queued;
         // keep their queue state and the queue hotbar instead of forcing the lobby state.
@@ -2604,6 +2658,7 @@ public final class BotMatchSession {
             profile.setState(ProfileState.LOBBY);
         }
         profile.setMatch(null);
+        MatchResultFlight.clear(player);
         PlayerUtil.reset(player, true, true);
         player.setWalkSpeed(originalWalkSpeed <= 0.0F ? 0.2F : originalWalkSpeed);
         Party party = AlleyPlugin.getInstance().getService(PartyService.class).getParty(player);
@@ -2620,20 +2675,24 @@ public final class BotMatchSession {
     }
 
     private void cleanupBot() {
-        if (this.gomokuGame != null) this.gomokuGame.shutdown();
-        if (this.activeRodProjectile != null && this.activeRodProjectile.isValid()) {
-            this.activeRodProjectile.remove();
-        }
-        for (Projectile projectile : this.spawnedProjectiles) {
-            if (projectile != null && projectile.isValid()) projectile.remove();
-        }
-        this.spawnedProjectiles.clear();
+        if (this.gomokuGame != null) runCleanup("Gomoku board", this.gomokuGame::shutdown);
+        runCleanup("projectiles", () -> {
+            if (this.activeRodProjectile != null && this.activeRodProjectile.isValid()) {
+                this.activeRodProjectile.remove();
+            }
+            for (Projectile projectile : this.spawnedProjectiles) {
+                if (projectile != null && projectile.isValid()) projectile.remove();
+            }
+            this.spawnedProjectiles.clear();
+        });
         UUID botId = bot == null ? null : bot.getUniqueId();
-        if (bot != null) AlleyPlugin.getInstance().getService(CombatService.class).removeLastAttacker(bot, true);
+        if (bot != null) runCleanup("bot combat tag", () ->
+                AlleyPlugin.getInstance().getService(CombatService.class).removeLastAttacker(bot, true));
         if (botId != null) {
-            AlleyPlugin.getInstance().getService(KnockbackManager.class).removePlayer(botId);
+            runCleanup("bot knockback state", () ->
+                    AlleyPlugin.getInstance().getService(KnockbackManager.class).removePlayer(botId));
         }
-        removeBotNpc();
+        runCleanup("native bot entity", this::removeBotNpc);
         if (botId != null) {
             AlleyPlugin.getInstance().getService(ProfileService.class).getProfiles().remove(botId);
         }

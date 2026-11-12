@@ -28,6 +28,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.Set;
+import java.util.Map;
 
 public class PlayAgainListener implements Listener {
     public static final String KIT_KEY = "play_again_kit";
@@ -43,13 +44,20 @@ public class PlayAgainListener implements Listener {
      * 而返回大厅的补纸逻辑可能恰好在这之间运行——该标记防止补纸逻辑误判"未入队"而补发第4格纸。
      */
     private static final Set<java.util.UUID> PENDING_PLAY_AGAIN = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final Map<java.util.UUID, Object> PENDING_BOT_REMATCHES = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Whether the player is currently awaiting the delayed Play Again queue add.
      * 玩家是否正在等待下一tick的"再来一局"入队。
      */
     public static boolean isPlayAgainPending(Player player) {
-        return player != null && PENDING_PLAY_AGAIN.contains(player.getUniqueId());
+        return player != null && (PENDING_PLAY_AGAIN.contains(player.getUniqueId())
+                || PENDING_BOT_REMATCHES.containsKey(player.getUniqueId()));
+    }
+
+    /** A voluntary Bot leave also cancels a rematch accepted two ticks earlier. */
+    public static boolean cancelPendingBotRematch(Player player) {
+        return player != null && PENDING_BOT_REMATCHES.remove(player.getUniqueId()) != null;
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -105,46 +113,46 @@ public class PlayAgainListener implements Listener {
             player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
             return false;
         }
+        Object request = new Object();
+        if (PENDING_PLAY_AGAIN.contains(player.getUniqueId())
+                || PENDING_BOT_REMATCHES.putIfAbsent(player.getUniqueId(), request) != null) return false;
 
         // Released by releasePlayerForPlayAgain; otherwise this paper was clicked
         // after the match already returned the player to the lobby.
         MatchState matchState = playerProfile.getMatch() == null ? null : playerProfile.getMatch().getState();
         if (playerProfile.getState() == ProfileState.PLAYING
                 && (matchState == MatchState.ENDING_MATCH || matchState == MatchState.ENDING_ROUND)) {
-            PENDING_PLAY_AGAIN.add(player.getUniqueId());
             if (!playerProfile.getMatch().releasePlayerForPlayAgain(player)) {
-                PENDING_PLAY_AGAIN.remove(player.getUniqueId());
+                PENDING_BOT_REMATCHES.remove(player.getUniqueId(), request);
                 player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
                 return false;
             }
         } else if (playerProfile.getState() != ProfileState.LOBBY || playerProfile.getMatch() != null) {
+            PENDING_BOT_REMATCHES.remove(player.getUniqueId(), request);
             player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
             return false;
         }
 
         Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-            PENDING_PLAY_AGAIN.remove(player.getUniqueId());
-            Profile currentProfile = profileService.getProfile(player.getUniqueId());
-            if (!player.isOnline() || currentProfile == null
-                    || currentProfile.getState() != ProfileState.LOBBY
-                    || currentProfile.getMatch() != null
-                    || currentProfile.getQueueProfile() != null) {
-                return;
-            }
-            if (player.isDead()) player.spigot().respawn();
-            MatchResultFlight.clear(player);
-            player.setAllowFlight(false);
-            player.setFlying(false);
-            AlleyPlugin.getInstance().getService(SpawnService.class).teleportToSpawn(player);
-            BotService botService = AlleyPlugin.getInstance().getService(BotService.class);
-            // The ending session still holds the "one session per player" slot until
-            // its delayed cleanup finishes, so hand the rematch over to the service
-            // when that happens instead of calling startMatch here.
-            if (botService.getSession(player) != null) {
-                ((dev.revere.alley.feature.bot.internal.BotServiceImpl) botService)
-                        .scheduleRematch(player, kit, difficultyId);
-            } else {
-                botService.startMatch(player, kit, difficultyId);
+            try {
+                if (PENDING_BOT_REMATCHES.get(player.getUniqueId()) != request) return;
+                Profile currentProfile = profileService.getProfile(player.getUniqueId());
+                if (!player.isOnline() || currentProfile == null
+                        || currentProfile.getState() != ProfileState.LOBBY
+                        || currentProfile.getMatch() != null
+                        || currentProfile.getQueueProfile() != null) {
+                    return;
+                }
+                if (player.isDead()) player.spigot().respawn();
+                MatchResultFlight.clear(player);
+                player.setAllowFlight(false);
+                player.setFlying(false);
+                AlleyPlugin.getInstance().getService(SpawnService.class).teleportToSpawn(player);
+                BotService botService = AlleyPlugin.getInstance().getService(BotService.class);
+                // Close the old session now instead of waiting for its result timer.
+                botService.restartMatch(player, kit, difficultyId);
+            } finally {
+                PENDING_BOT_REMATCHES.remove(player.getUniqueId(), request);
             }
         }, 2L);
         return true;

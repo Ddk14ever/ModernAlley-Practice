@@ -2,6 +2,7 @@ package dev.revere.alley.feature.combat;
 
 import dev.revere.alley.AlleyPlugin;
 import org.bukkit.Bukkit;
+import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -24,8 +25,14 @@ public final class CombatAttribution {
     }
 
     public static Player getAttacker(EntityDamageByEntityEvent event) {
-        Player attacker = getAttacker(event.getDamageSource().getCausingEntity());
+        Player attacker = getAttacker(event.getDamageSource());
         return attacker != null ? attacker : getAttacker(event.getDamager());
+    }
+
+    public static Player getAttacker(DamageSource source) {
+        if (source == null) return null;
+        Player attacker = getAttacker(source.getCausingEntity());
+        return attacker != null ? attacker : getAttacker(source.getDirectEntity());
     }
 
     private static Player getAttacker(Entity entity) {

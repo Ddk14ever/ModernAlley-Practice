@@ -3,44 +3,44 @@
 # Downward KB is always disabled by the LEGACY branch and has no YAML switch.
 branch: LEGACY
 horizontal:
-  ground: 0.385
-  air: 0.38
-  sprint_extra: 0.5
+  ground: 0.61
+  air: 0.608
+  sprint_extra: 0.2
   # One-shot horizontal bonus after a valid STOP -> START -> melee-hit W-tap.
-  wtap_extra: 0.15
+  wtap_extra: 0.12
 vertical:
-  ground: 0.3375
-  air: 0.33
+  ground: 0.3675
+  air: 0.36
   sprint_extra: 0.02
   # Fixed base Y limit, applied before sprint/enchant or Punch bonus.
-  limit: 0.45
+  limit: 0.5
 attacker:
   # 1.8 slows the attacker's horizontal motion after sprint/enchant knockback.
-  horizontal_slowdown: 0.6
+  horizontal_slowdown: 0.58
 friction:
   # Vanilla retains half of the victim's previous X/Z motion (motion / 2.0).
   horizontal: 2.1
 distance_reduction:
   # Reduces only the base horizontal impulse. Sprint/enchant and Punch extras are unchanged.
   enabled: true
-  start: 2.1
+  start: 2.8
   factor: 0.08
-  maximum: 5.0
-  minimum_horizontal: 0.25
+  maximum: 3.0
+  minimum_horizontal: 0.3
 arrow:
-  horizontal: 0.4
-  vertical: 0.3
+  horizontal: 0.6
+  vertical: 0.35
   vertical_limit: 0.4
   punch_horizontal: 0.6
   punch_vertical: 0.1
 hit_delay: 20
 hit_delay_format: nms_window
-y_limit: 3.5
+y_limit: 4.5
 stop_sprint: true
 projectile:
   enabled: true
-  horizontal: 0.24
-  vertical: 0.2
+  horizontal: 0.45
+  vertical: 0.3
   horizontal_multiplier: 0.9
   vertical_multiplier: 0.9
 # 1.8 melee geometry: standing 0.6 x 1.8 box expanded by 0.1
@@ -76,4 +76,4 @@ modern:
   # at 3.0, matching EntityRenderer#getMouseOver in 1.8. The +0.1 collision
   # border is part of the box, NOT added on top of this cap, so lowering this
   # to 2.9 would make hits SHORTER than 1.8 rather than equal to it.
-  entity_interaction_range: 3.0
+  entity_interaction_range: 2.95

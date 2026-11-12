@@ -187,7 +187,7 @@ public class MatchListener implements Listener {
         if (player.getInventory().getItemInMainHand().getType() == Material.TOTEM_OF_UNDYING
                 || player.getInventory().getItemInOffHand().getType() == Material.TOTEM_OF_UNDYING) return;
 
-        if (handlePartyElimination(player, profile.getMatch(), event.getCause())) {
+        if (handlePartyElimination(player, profile.getMatch(), event.getCause(), event.getDamageSource())) {
             event.setCancelled(true);
         }
     }
@@ -225,7 +225,7 @@ public class MatchListener implements Listener {
 
         Match match = profile.getMatch();
         // Party matches keep the victim alive through the existing elimination path.
-        if (handlePartyElimination(player, match, event.getCause())) {
+        if (handlePartyElimination(player, match, event.getCause(), event.getDamageSource())) {
             event.setCancelled(true);
             return;
         }
@@ -260,6 +260,11 @@ public class MatchListener implements Listener {
      */
     private void dispatchSyntheticDeath(Player player, DamageSource damageSource,
                                         EntityDamageEvent.DamageCause cause) {
+        Profile deathProfile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfile(player.getUniqueId());
+        if (deathProfile != null && deathProfile.getMatch() != null) {
+            deathProfile.getMatch().playDeathFeedback(player, damageSource);
+        }
         // PlayerInventory#getContents already covers storage, armour and off-hand,
         // mirroring the item set a vanilla death event would expose.
         List<ItemStack> drops = new ArrayList<>();
@@ -583,12 +588,18 @@ public class MatchListener implements Listener {
     }
 
     private boolean handlePartyElimination(Player player, Match match, EntityDamageEvent.DamageCause cause) {
+        return handlePartyElimination(player, match, cause, null);
+    }
+
+    private boolean handlePartyElimination(Player player, Match match, EntityDamageEvent.DamageCause cause,
+                                           DamageSource source) {
         if (!match.isPartyMultiplayerMatch()) return false;
         if (match.getState() != MatchState.STARTING && match.getState() != MatchState.RUNNING) return false;
 
         MatchGamePlayer gamePlayer = match.getFromAllGamePlayers(player);
         if (gamePlayer == null || gamePlayer.isDead() || gamePlayer.isEliminated()) return true;
 
+        match.playDeathFeedback(player, source);
         player.setHealth(player.getMaxHealth());
         player.setVelocity(new org.bukkit.util.Vector());
         blockDeadPlayerPickup(player);

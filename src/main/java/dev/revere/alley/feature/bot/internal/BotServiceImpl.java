@@ -31,6 +31,7 @@ import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingBotQueue;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingGomoku;
 import dev.revere.alley.feature.party.PartyService;
+import dev.revere.alley.feature.queue.listener.PlayAgainListener;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -68,8 +69,6 @@ public class BotServiceImpl implements BotService {
     private final Set<UUID> pendingStarts = ConcurrentHashMap.newKeySet();
     private final Map<String, CompletableFuture<PlayerProfile>> skinProfiles = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> customSaveTasks = new ConcurrentHashMap<>();
-    /** Bot rematches requested by Play Again while the previous session is ending. */
-    private final Map<UUID, PendingRematch> pendingRematches = new ConcurrentHashMap<>();
     private PacketAdapter inventoryPacketListener;
 
     @Override
@@ -94,7 +93,6 @@ public class BotServiceImpl implements BotService {
         entitySessions.clear();
         openInventories.clear();
         pendingStarts.clear();
-        pendingRematches.clear();
         skinProfiles.clear();
         customSaveTasks.values().forEach(BukkitTask::cancel);
         customSaveTasks.clear();
@@ -253,7 +251,8 @@ public class BotServiceImpl implements BotService {
         }
 
         Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
-        if (profile == null || profile.getState() != ProfileState.LOBBY || getSession(player) != null
+        if (profile == null || profile.getState() != ProfileState.LOBBY
+                || profile.getMatch() != null || profile.getQueueProfile() != null || getSession(player) != null
                 || pendingStarts.contains(player.getUniqueId())) {
             player.sendMessage(CC.translate("&cYou cannot start a bot match right now."));
             return false;
@@ -314,6 +313,7 @@ public class BotServiceImpl implements BotService {
                                        FileConfiguration config, PlayerProfile skinProfile) {
         Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
         if (!player.isOnline() || profile == null || profile.getState() != ProfileState.LOBBY
+                || profile.getMatch() != null || profile.getQueueProfile() != null
                 || getSession(player) != null
                 || AlleyPlugin.getInstance().getService(PartyService.class).getParty(player) != null) {
             if (player.isOnline()) player.sendMessage(CC.translate("&cYou cannot start a bot match right now."));
@@ -399,36 +399,33 @@ public class BotServiceImpl implements BotService {
         if (session != null) session.finish(playerWon);
     }
 
+    @Override
+    public boolean leaveMatch(Player player) {
+        boolean cancelledRematch = PlayAgainListener.cancelPendingBotRematch(player);
+        BotMatchSession session = getSession(player);
+        if (session == null || !session.getPlayerId().equals(player.getUniqueId())) return cancelledRematch;
+        session.leave();
+        return true;
+    }
+
+    @Override
+    public boolean restartMatch(Player player, Kit kit, String difficultyId) {
+        if (player == null || !player.isOnline() || kit == null
+                || difficultyId == null || difficultyId.isBlank()) return false;
+        BotMatchSession session = getSession(player);
+        if (session != null && !session.closeForRematch()) return false;
+        return startMatch(player, kit, difficultyId);
+    }
+
     public void registerBot(BotMatchSession session, Player bot) {
         entitySessions.put(bot.getUniqueId(), session);
     }
 
     public void complete(BotMatchSession session) {
-        playerSessions.remove(session.getPlayerId(), session);
         if (session.getBotId() != null) entitySessions.remove(session.getBotId(), session);
+        // A late callback from an old session must not alter a newer session.
+        if (!playerSessions.remove(session.getPlayerId(), session)) return;
         openInventories.remove(session.getPlayerId());
-
-        PendingRematch rematch = pendingRematches.remove(session.getPlayerId());
-        if (rematch == null || !session.getKit().equals(rematch.kit())) return;
-        Player player = Bukkit.getPlayer(session.getPlayerId());
-        if (player == null || !player.isOnline()) return;
-        // The old session's cleanup just finished; start the rematch next tick so
-        // the arena/teleport work from this tick cannot interleave with spawning.
-        Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(),
-                () -> startMatch(player, rematch.kit(), rematch.difficultyId()));
-    }
-
-    /**
-     * Queues a Bot rematch for when the player is still inside the ending session.
-     * Clicking Play Again happens before the delayed return-to-lobby, so a direct
-     * start would be rejected by the "already in a session" guard.
-     */
-    public void scheduleRematch(Player player, Kit kit, String difficultyId) {
-        if (player == null || kit == null || difficultyId == null || difficultyId.isBlank()) return;
-        pendingRematches.put(player.getUniqueId(), new PendingRematch(kit, difficultyId));
-    }
-
-    private record PendingRematch(Kit kit, String difficultyId) {
     }
 
     public boolean isInventoryOpen(Player player) {

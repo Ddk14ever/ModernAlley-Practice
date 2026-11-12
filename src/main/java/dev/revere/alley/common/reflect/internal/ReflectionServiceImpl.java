@@ -6,6 +6,7 @@ import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.common.logger.Logger;
 import dev.revere.alley.common.reflect.Reflection;
 import dev.revere.alley.common.reflect.ReflectionService;
+import dev.revere.alley.common.reflect.internal.types.DeathReflectionServiceImpl;
 import lombok.Getter;
 import org.reflections.Reflections;
 
@@ -38,6 +39,12 @@ public class ReflectionServiceImpl implements ReflectionService {
     @Override
     public void initialize(AlleyContext context) {
         this.registerReflectionServices();
+    }
+
+    @Override
+    public void shutdown(AlleyContext context) {
+        DeathReflectionServiceImpl feedback = getReflectionService(DeathReflectionServiceImpl.class);
+        if (feedback != null) feedback.shutdown();
     }
 
     private void registerReflectionServices() {

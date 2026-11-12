@@ -18,10 +18,8 @@ public class BotLeaveCommand extends BaseCommand {
     public void onCommand(CommandArgs command) {
         Player player = command.getPlayer();
         BotService botService = this.plugin.getService(BotService.class);
-        if (botService.getSession(player) == null) {
+        if (!botService.leaveMatch(player)) {
             player.sendMessage(CC.translate("&cYou are not in a bot duel."));
-            return;
         }
-        botService.endMatch(player, false);
     }
 }

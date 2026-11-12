@@ -8,6 +8,7 @@ import dev.revere.alley.common.SoundUtil;
 import dev.revere.alley.common.logger.Logger;
 import dev.revere.alley.common.reflect.ReflectionService;
 import dev.revere.alley.common.reflect.internal.types.ActionBarReflectionServiceImpl;
+import dev.revere.alley.common.reflect.internal.types.DeathReflectionServiceImpl;
 import dev.revere.alley.common.reflect.internal.types.TitleReflectionServiceImpl;
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.common.time.TimeUtil;
@@ -23,6 +24,7 @@ import dev.revere.alley.feature.bot.BotAiMode;
 import dev.revere.alley.feature.bot.BotService;
 import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.combat.CombatService;
+import dev.revere.alley.feature.combat.CombatAttribution;
 import dev.revere.alley.feature.challenge.ChallengeService;
 import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.cosmetic.CosmeticService;
@@ -84,6 +86,7 @@ import net.md_5.bungee.api.chat.BaseComponent;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.damage.DamageSource;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -843,6 +846,7 @@ public abstract class Match {
             return;
         }
 
+        this.playDeathFeedback(player, null);
         MatchListener.blockDeadPlayerPickup(player);
 
         this.handleParticipant(player, gamePlayer);
@@ -884,6 +888,23 @@ public abstract class Match {
         if (!this.shouldHandleRegularRespawn(player)) {
             this.startRespawnProcess(player);
         }
+    }
+
+    /** Presentation only: capture the victim before existing respawn/visibility changes. */
+    public void playDeathFeedback(Player victim, DamageSource source) {
+        MatchGamePlayer gamePlayer = this.getFromAllGamePlayers(victim);
+        if (gamePlayer == null || gamePlayer.isDisconnected() || gamePlayer.isDead()
+                || gamePlayer.isEliminated()) return;
+
+        // Cancelled lethal hits never reach CombatService's MONITOR listener.
+        // Use this hit's source first, including projectile/crystal ownership.
+        Player killer = CombatAttribution.getAttacker(source);
+        if (killer == null) killer = this.plugin.getService(CombatService.class).getLastAttacker(victim);
+        if (killer != null && (killer == victim || this.getFromAllGamePlayers(killer) == null)) killer = null;
+
+        DeathReflectionServiceImpl feedback = this.plugin.getService(ReflectionService.class)
+                .getReflectionService(DeathReflectionServiceImpl.class);
+        if (feedback != null) feedback.animateDeath(victim, killer);
     }
 
     /**
