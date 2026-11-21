@@ -3,6 +3,7 @@ package dev.revere.alley.feature.bot.entity;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -336,7 +337,7 @@ public final class NativeBotPlayer {
 
     public void attack(Player target) {
         player.swingMainHand();
-        player.attack(target);
+        AlleyPlugin.getInstance().getService(KnockbackManager.class).attack(player, target);
     }
 
     public void remove() {

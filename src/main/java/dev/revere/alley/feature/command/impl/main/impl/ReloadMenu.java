@@ -15,6 +15,7 @@ import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.item.ItemService;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.kit.raiding.BaseRaidingService;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.leaderboard.hologram.HologramManager;
 import dev.revere.alley.feature.level.LevelService;
 import dev.revere.alley.feature.match.MatchService;
@@ -46,7 +47,7 @@ public final class ReloadMenu extends Menu {
 
     static {
         OPTIONS.add(new ReloadOption(Material.BOOK, "&e&lConfig Files",
-                Arrays.asList("&7Re-read every YAML file from disk:", "&7settings, messages, menus, kits, arenas, bots,", "&7autoclick, shop, holograms, challenges, etc."),
+                Arrays.asList("&7Re-read every YAML file from disk:", "&7settings, messages, menus, kits, arenas, bots,", "&7knockback, autoclick, shop, holograms, etc."),
                 p -> reloadAllConfigFiles()));
         OPTIONS.add(new ReloadOption(Material.DIAMOND_SWORD, "&6&lQueues",
                 Arrays.asList("&7Rebuild ranked/unranked/duos", "&7queues from current kits."),
@@ -59,23 +60,20 @@ public final class ReloadMenu extends Menu {
         OPTIONS.add(new ReloadOption(Material.STICK, "&c&lKnockback Profiles",
                 Arrays.asList("&7Re-read knockback/*.yml", "&7from disk."),
                 p -> AlleyPlugin.getInstance()
-                        .getService(dev.revere.alley.feature.knockback.KnockbackManager.class).reloadProfiles()));
+                        .getService(KnockbackManager.class).reloadProfiles()));
         OPTIONS.add(new ReloadOption(Material.BEACON, "&b&lLeaderboards",
                 Arrays.asList("&7Full recalculation from DB.", "&cHeavy — use sparingly."),
                 p -> AlleyPlugin.getInstance()
                         .getService(dev.revere.alley.feature.leaderboard.LeaderboardService.class).forceRecalculateAll()));
-        // "Reload All" added last so it can reference the list safely
         OPTIONS.add(new ReloadOption(Material.NETHER_STAR, "&d&lReload All",
                 Arrays.asList("&7Run all reload operations", "&7in sequence."),
-                p -> OPTIONS.stream()
-                        .filter(opt -> !opt.name.contains("All"))
-                        .forEach(opt -> opt.action.accept(p))));
+                p -> reloadAllSubsystems()));
     }
 
     /**
      * Re-reads every YAML file the plugin uses and refreshes all services
      * that cache YAML-derived data in memory:
-     * settings/messages/menus (ConfigService) + kits, arenas, bots, titles,
+     * settings/messages/menus (ConfigService) + kits, knockback, arenas, bots, titles,
      * levels, divisions, hotbars, custom items, challenges, autoclick, shop,
      * holograms, filter, spawn, blocked lists.
      */
@@ -95,6 +93,7 @@ public final class ReloadMenu extends Menu {
 
         plugin.getService(KitService.class).loadKits();
         plugin.getService(BaseRaidingService.class).loadRaidingKitMappings();
+        plugin.getService(KnockbackManager.class).reloadProfiles();
 
         ArenaService arenaService = plugin.getService(ArenaService.class);
         arenaService.loadArenas();
@@ -111,6 +110,16 @@ public final class ReloadMenu extends Menu {
         plugin.getService(SpawnService.class).reloadSpawnLocation();
         plugin.getService(ServerService.class).loadBlockedCraftingItems();
         plugin.getService(MatchService.class).reloadBlockedCommands();
+    }
+
+    private static void reloadAllSubsystems() {
+        // Config Files already reloads knockback and refreshes arena caches.
+        // Running those options again would clear live combat state twice.
+        reloadAllConfigFiles();
+        AlleyPlugin plugin = AlleyPlugin.getInstance();
+        plugin.getService(QueueService.class).reloadQueues();
+        plugin.getService(dev.revere.alley.feature.leaderboard.LeaderboardService.class)
+                .forceRecalculateAll();
     }
 
     @Override

@@ -9,6 +9,11 @@ import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.knockback.listener.KnockbackListener;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubKnockbackListener;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubCombatListener;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubHitRegistration;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubGravity;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubSettings;
 import dev.revere.alley.feature.knockback.listener.PotionMotionListener;
 import dev.revere.alley.feature.knockback.nms.LegacyMotionBridge;
 import dev.revere.alley.feature.knockback.packet.MisplaceHandler;
@@ -19,6 +24,8 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.util.Vector;
 
 import java.io.File;
@@ -29,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @project Alley
  * @since 05/07/2026
  *
- * Built-in knockback manager. Resolves kit-authoritative DEFAULT/LEGACY branches.
+ * Built-in knockback manager. Resolves kit-authoritative DEFAULT/LEGACY/MINEMENCLUB branches.
  */
 @Service(provides = KnockbackManager.class, priority = 150)
 public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Service {
@@ -40,9 +47,13 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     private final Map<UUID, PlayerKnockbackData> playerData = new ConcurrentHashMap<>();
     private final Set<String> branchMismatchWarnings = ConcurrentHashMap.newKeySet();
     private final LegacyMotionBridge legacyMotionBridge = new LegacyMotionBridge();
+    private final MinemenClubGravity minemenClubGravity = new MinemenClubGravity(this);
     private HitDetection hitDetection;
     private MisplaceHandler misplaceHandler;
     private KnockbackListener knockbackListener;
+    private MinemenClubKnockbackListener minemenClubListener;
+    private MinemenClubCombatListener minemenClubCombat;
+    private MinemenClubHitRegistration minemenClubHitRegistration;
     private PotionMotionListener potionMotionListener;
     private LegacySprintTracker legacySprintTracker;
     private File profilesDir;
@@ -56,6 +67,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         }
         AlleyPlugin.getInstance().saveResource("knockback/default.yml", false);
         AlleyPlugin.getInstance().saveResource("knockback/1_8.yml", false);
+        AlleyPlugin.getInstance().saveResource("knockback/MinemenClub.yml", false);
         reloadProfiles();
         synchronizeHitDelayConfiguration();
 
@@ -66,6 +78,19 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         this.knockbackListener = new KnockbackListener(this);
         AlleyPlugin.getInstance().getServer().getPluginManager()
                 .registerEvents(this.knockbackListener, AlleyPlugin.getInstance());
+        AlleyPlugin.getInstance().getServer().getPluginManager()
+                .registerEvents(this.minemenClubGravity, AlleyPlugin.getInstance());
+        this.minemenClubGravity.enable();
+        this.minemenClubCombat = new MinemenClubCombatListener(this);
+        AlleyPlugin.getInstance().getServer().getPluginManager()
+                .registerEvents(this.minemenClubCombat, AlleyPlugin.getInstance());
+        this.minemenClubHitRegistration = new MinemenClubHitRegistration(this);
+        AlleyPlugin.getInstance().getServer().getPluginManager()
+                .registerEvents(this.minemenClubHitRegistration, AlleyPlugin.getInstance());
+        this.minemenClubHitRegistration.enable();
+        this.minemenClubListener = new MinemenClubKnockbackListener(this);
+        AlleyPlugin.getInstance().getServer().getPluginManager()
+                .registerEvents(this.minemenClubListener, AlleyPlugin.getInstance());
         this.hitDetection = new HitDetection(this);
         AlleyPlugin.getInstance().getServer().getPluginManager()
                 .registerEvents(this.hitDetection, AlleyPlugin.getInstance());
@@ -80,6 +105,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         // Tick loop for packet delay queue
         AlleyPlugin.getInstance().getServer().getScheduler().runTaskTimer(AlleyPlugin.getInstance(), () -> {
             currentTick++;
+            if (minemenClubListener != null) minemenClubListener.tick();
             if (legacySprintTracker != null) legacySprintTracker.tick();
             if (misplaceHandler != null) misplaceHandler.tick();
         }, 1L, 1L);
@@ -87,6 +113,9 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     @Override
     public void shutdown(AlleyContext context) {
+        minemenClubGravity.disable();
+        if (minemenClubListener != null) minemenClubListener.clear();
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.disable();
         if (this.hitDetection != null) {
             this.hitDetection.clear();
         }
@@ -99,7 +128,21 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     // --- Profiles ---
+    public String getGravityCompensationStatus(Player player) {
+        return minemenClubGravity.compensationStatus(player);
+    }
+
+    public void beginKnockbackGravity(Player player, Vector before, Vector delivered) {
+        minemenClubGravity.beginKnockback(player, before, delivered);
+    }
+
     public void reloadProfiles() {
+        if (minemenClubListener != null) minemenClubListener.clear();
+        playerData.forEach((uuid, data) -> {
+            data.setVelocity(null);
+            data.clearLegacyState();
+            if (misplaceHandler != null) misplaceHandler.clearPlayer(uuid);
+        });
         profiles.clear();
         branchMismatchWarnings.clear();
         File[] files = profilesDir.listFiles((d, n) -> n.endsWith(".yml"));
@@ -119,7 +162,8 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 configChanged = true;
             }
             KnockbackBranch inferredBranch = name.equalsIgnoreCase("1_8")
-                    ? KnockbackBranch.LEGACY : KnockbackBranch.DEFAULT;
+                    ? KnockbackBranch.LEGACY : name.equalsIgnoreCase("MinemenClub")
+                    ? KnockbackBranch.MINEMENCLUB : KnockbackBranch.DEFAULT;
             KnockbackBranch configuredBranch = KnockbackBranch.fromName(config.getString("branch"));
             if (configuredBranch == null) {
                 if (config.isSet("branch")) {
@@ -149,6 +193,13 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 configChanged |= setIfMissing(config, "arrow.vertical_limit", 0.4D);
                 configChanged |= setIfMissing(config, "arrow.punch_horizontal", 0.6D);
                 configChanged |= setIfMissing(config, "arrow.punch_vertical", 0.1D);
+            }
+            if (configuredBranch == KnockbackBranch.MINEMENCLUB) {
+                // Freeze the old horizontal-derived divisor once; subsequent
+                // horizontal edits must not silently alter inheritance too.
+                MinemenClubSettings previous = MinemenClubSettings.load(config);
+                configChanged |= setIfMissing(config, "friction.horizontal", previous.horizontalFriction());
+                configChanged |= setIfMissing(config, "gravity", 0.08D);
             }
             if (!config.isSet(HIT_DELAY_FORMAT_KEY)) {
                 int legacyDelay = Math.max(0, config.getInt("hit_delay", 10));
@@ -208,6 +259,18 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 applyHitDelayWindow(player);
                 applyEntityInteractionRange(player, profile);
             }
+            if (minemenClubHitRegistration != null) minemenClubHitRegistration.refreshPlayer(player);
+        }
+        minemenClubGravity.refreshAll();
+
+        AlleyPlugin.getInstance().getLogger().info(
+                "[Knockback] Loaded " + profiles.size() + " profile(s) from "
+                        + profilesDir.getAbsolutePath());
+        for (KnockbackProfile profile : profiles.values()) {
+            if (profile.getBranch() != KnockbackBranch.MINEMENCLUB) continue;
+            AlleyPlugin.getInstance().getLogger().info(
+                    "[Knockback] '" + profile.getName() + "' branch=" + profile.getBranch()
+                            + " " + profile.getMinemenClub() + " hit_delay=" + profile.getHitDelay());
         }
     }
 
@@ -233,7 +296,11 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     public KnockbackProfile getFallbackProfile(KnockbackBranch branch) {
-        String preferredName = branch == KnockbackBranch.LEGACY ? "1_8" : "default";
+        String preferredName = switch (branch) {
+            case LEGACY -> "1_8";
+            case MINEMENCLUB -> "minemenclub";
+            case DEFAULT -> "default";
+        };
         KnockbackProfile preferred = profiles.get(preferredName);
         if (preferred != null && preferred.getBranch() == branch) return preferred;
         return profiles.values().stream()
@@ -264,6 +331,11 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     public KnockbackBranch getRequiredBranch(Kit kit) {
+        // An explicit Club profile takes precedence over the older sword-block toggle.
+        KnockbackProfile requested = kit == null ? null : getProfile(kit.getKnockbackProfile());
+        if (requested != null && requested.getBranch() == KnockbackBranch.MINEMENCLUB) {
+            return KnockbackBranch.MINEMENCLUB;
+        }
         return kit != null && kit.isSettingEnabled(KitSettingOldSwordBlocking.class)
                 ? KnockbackBranch.LEGACY : KnockbackBranch.DEFAULT;
     }
@@ -287,6 +359,44 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     public boolean isLegacyKnockback(Player player) {
         return getPlayerData(player).getBranch() == KnockbackBranch.LEGACY;
+    }
+
+    public boolean isMinemenClubKnockback(Player player) {
+        return getPlayerData(player).getBranch() == KnockbackBranch.MINEMENCLUB;
+    }
+
+    /** Shared entry point for client, Bot and auto-click melee attacks. */
+    public void attack(Player attacker, Entity target) {
+        if (minemenClubCombat != null && (isMinemenClubKnockback(attacker)
+                || target instanceof Player victim && isMinemenClubKnockback(victim))) {
+            minemenClubCombat.attack(attacker, target);
+        } else {
+            attacker.attack(target);
+        }
+    }
+
+    public boolean canMinemenClubAttack(Player attacker, Player victim) {
+        return minemenClubHitRegistration != null && minemenClubHitRegistration.canAttack(attacker, victim);
+    }
+
+    public void prepareMinemenClubDamage(EntityDamageEvent event) {
+        if (minemenClubCombat != null) minemenClubCombat.prepare(event);
+    }
+
+    public void clearMinemenClubCombatState(UUID player) {
+        if (minemenClubCombat != null) minemenClubCombat.clearPlayer(player);
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.clearPlayer(player);
+    }
+
+    public void clearMinemenClubCombatState() {
+        if (minemenClubCombat != null) minemenClubCombat.clear();
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.clear();
+    }
+
+    /** Old damage, sword blocking, projectiles, no cooldown and no sweeping. */
+    public boolean usesLegacyCombat(Kit kit) {
+        return kit != null && (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)
+                || getRequiredBranch(kit) == KnockbackBranch.MINEMENCLUB);
     }
 
     private void synchronizeHitDelayConfiguration() {
@@ -357,6 +467,9 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     public void removePlayer(UUID uuid) {
+        minemenClubGravity.clear(uuid);
+        if (minemenClubListener != null) minemenClubListener.clearPlayer(uuid);
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.removePlayer(uuid);
         PlayerKnockbackData data = playerData.remove(uuid);
         if (data != null) {
             // Cancel any one-tick legacy velocity delivery that still references
@@ -370,6 +483,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     public void clearKnockback(Player player) {
+        minemenClubGravity.clear(player.getUniqueId());
         PlayerKnockbackData data = getPlayerData(player);
         data.setProfileName(null);
         data.setBranch(KnockbackBranch.DEFAULT);
@@ -381,6 +495,11 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     /** Clears the live/category state while retaining the player's assigned profile. */
     public void resetHitDelayState(Player player) {
+        // Fake respawn/round resets must end the old flight even if the player
+        // never goes through a vanilla death or a spectator tick.
+        minemenClubGravity.clear(player.getUniqueId());
+        if (minemenClubListener != null) minemenClubListener.clearPlayer(player.getUniqueId());
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.refreshPlayer(player);
         PlayerKnockbackData data = getPlayerData(player);
         data.clearLegacyState();
         data.setVelocity(null);
@@ -495,6 +614,9 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
      * real client connection, such as the built-in Bot player.
      */
     public Vector consumePendingKnockback(Player player, Vector nativeVelocity) {
+        if (isMinemenClubKnockback(player)) {
+            return minemenClubListener == null ? null : minemenClubListener.consumePending(player);
+        }
         return this.knockbackListener == null
                 ? null
                 : this.knockbackListener.consumePendingKnockback(player, nativeVelocity);
@@ -527,6 +649,9 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
      * cleared so a stale copy can never be applied on a later tick.</p>
      */
     public Vector deliverPendingKnockback(Player player) {
+        if (isMinemenClubKnockback(player)) {
+            return minemenClubListener == null ? null : minemenClubListener.deliverBotVelocity(player);
+        }
         PlayerKnockbackData data = getPlayerData(player);
         Vector captured = data.consumeCapturedKnockback();
         Vector pending = consumePendingKnockback(player, player.getVelocity());
@@ -538,6 +663,10 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     public void applyLegacyPearlKnockback(Player attacker, Player victim, Vector impactVelocity) {
+        if (isMinemenClubKnockback(victim)) {
+            if (minemenClubListener != null) minemenClubListener.applyPearl(attacker, victim);
+            return;
+        }
         if (this.knockbackListener != null) {
             this.knockbackListener.applyLegacyPearlKnockback(attacker, victim, impactVelocity);
         }
@@ -604,14 +733,15 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     }
 
     /**
-     * Enabled oldHitDelay uses the profile's NMS window. Disabled always uses the vanilla
-     * window of 20, independently of the selected profile.
+     * MinemenClub always uses its profile's Club hurt window. Other branches keep the
+     * oldHitDelay toggle: enabled uses the profile window; disabled uses vanilla 20.
      */
     public void applyKnockback(Player player, Kit kit) {
         boolean oldHitDelayEnabled = kit.getKitSettings().stream()
                 .filter(KitSettingOldHitDelay.class::isInstance)
                 .anyMatch(setting -> setting.isEnabled());
-        int hitDelayWindow = oldHitDelayEnabled ? -1 : KitSettingOldHitDelay.DEFAULT_DELAY;
+        int hitDelayWindow = oldHitDelayEnabled || getRequiredBranch(kit) == KnockbackBranch.MINEMENCLUB
+                ? -1 : KitSettingOldHitDelay.DEFAULT_DELAY;
         KnockbackBranch branch = getRequiredBranch(kit);
         applyKnockback(player, resolveProfile(kit), branch, hitDelayWindow);
     }
@@ -630,6 +760,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     private void applyKnockback(Player player, KnockbackProfile profile,
                                 KnockbackBranch branch, int hitDelayWindow) {
+        if (minemenClubListener != null) minemenClubListener.clearPlayer(player.getUniqueId());
         if (misplaceHandler != null) {
             // Never carry delayed movement packets across kit/round transitions.
             misplaceHandler.clearPlayer(player.getUniqueId());
@@ -647,10 +778,12 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                     branch == KnockbackBranch.LEGACY && profile != null);
         }
         applyEntityInteractionRange(player, profile);
+        minemenClubGravity.apply(player, profile);
         // A profile transition starts a new hurt-resistance timeline. Reset the
         // live counter before changing the window, otherwise the first hit of a
         // new round/kit can be mistaken for a delta hit.
         player.setNoDamageTicks(0);
         applyHitDelayWindow(player);
+        if (minemenClubHitRegistration != null) minemenClubHitRegistration.refreshPlayer(player);
     }
 }

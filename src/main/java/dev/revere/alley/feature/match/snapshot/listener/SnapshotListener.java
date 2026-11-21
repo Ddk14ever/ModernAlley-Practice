@@ -5,7 +5,6 @@ import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
-import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.enums.ProfileState;
@@ -123,7 +122,7 @@ public class SnapshotListener implements Listener {
                 && attacker.getVehicle() == null;
         if (!fallingCritical) return false;
 
-        if (match.getKit().isSettingEnabled(KitSettingOldSwordBlocking.class)) return true;
+        if (AlleyPlugin.getInstance().getService(KnockbackManager.class).usesLegacyCombat(match.getKit())) return true;
         return !attacker.isSprinting() && attacker.getAttackCooldown() > 0.9f;
     }
 }

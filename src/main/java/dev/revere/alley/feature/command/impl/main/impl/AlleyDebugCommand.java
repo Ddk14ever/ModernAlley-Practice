@@ -8,6 +8,11 @@ import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.cooldown.CooldownService;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.kit.setting.KitSettingService;
+import dev.revere.alley.feature.knockback.KnockbackBranch;
+import dev.revere.alley.feature.knockback.KnockbackManager;
+import dev.revere.alley.feature.knockback.KnockbackProfile;
+import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubSettings;
 import dev.revere.alley.feature.queue.QueueService;
 import dev.revere.alley.feature.emoji.EmojiService;
 import dev.revere.alley.feature.duel.DuelRequestService;
@@ -17,6 +22,9 @@ import dev.revere.alley.feature.party.PartyService;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.common.text.CC;
+import dev.revere.alley.common.version.ClientVersionService;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
 
 import java.text.NumberFormat;
@@ -33,7 +41,7 @@ public class AlleyDebugCommand extends BaseCommand {
     @CommandData(
             name = "alley.debug",
             isAdminOnly = true,
-            usage = "alley debug <memory/instance/profile/profileData>",
+            usage = "alley debug <memory/instance/profile/profileData/kb> [player]",
             description = "Displays debug information for development purposes."
             // 显示用于开发目的的调试信息。
     )
@@ -51,6 +59,14 @@ public class AlleyDebugCommand extends BaseCommand {
         }
 
         switch (args[0]) {
+            case "kb":
+                Player target = args.length > 1 ? this.plugin.getServer().getPlayerExact(args[1]) : player;
+                if (target == null) {
+                    player.sendMessage(CC.translate("&cThat player is not online."));
+                    return;
+                }
+                this.sendKnockbackInfo(target, player);
+                break;
             case "memory":
                 this.sendMemoryInfo(player);
                 break;
@@ -67,6 +83,56 @@ public class AlleyDebugCommand extends BaseCommand {
                 command.sendUsage();
                 break;
         }
+    }
+
+    private void sendKnockbackInfo(Player target, Player viewer) {
+        KnockbackManager manager = this.plugin.getService(KnockbackManager.class);
+        PlayerKnockbackData data = manager.getPlayerData(target);
+        KnockbackProfile applied = manager.getAppliedProfile(target);
+        viewer.sendMessage(CC.translate("&6[KB] &f" + target.getName()
+                + " &7branch=&e" + data.getBranch()
+                + " &7assigned=&e" + data.getProfileName()
+                + " &7resolved=&e" + (applied == null ? "none" : applied.getName())));
+        viewer.sendMessage(CC.translate("&7Hurt window: &f" + target.getMaximumNoDamageTicks()
+                + " &7remaining: &f" + target.getNoDamageTicks()));
+        if (applied == null) {
+            viewer.sendMessage(CC.translate("&7No knockback profile is applied to this player."));
+            return;
+        }
+        if (applied.getBranch() != KnockbackBranch.MINEMENCLUB) return;
+
+        MinemenClubSettings settings = applied.getMinemenClub();
+        viewer.sendMessage(CC.translate("&7Loaded horizontal=&f" + settings.horizontal()
+                + " &7vertical=&f" + settings.vertical()
+                + " &7sprint-multiplier=&f" + settings.sprintMultiplier()));
+        viewer.sendMessage(CC.translate("&7friction.horizontal=&f" + settings.horizontalFriction()
+                + " &7gravity=&f" + settings.gravity()));
+        AttributeInstance gravity = target.getAttribute(Attribute.GRAVITY);
+        viewer.sendMessage(CC.translate("&7Server gravity attribute=&f"
+                + (gravity == null ? "unavailable" : gravity.getValue())));
+        if (!data.isServerControlled()) {
+            int protocol = this.plugin.getService(ClientVersionService.class).getProtocol(target);
+            if (protocol <= 0) {
+                viewer.sendMessage(CC.translate(
+                        "&eGravity: paused (unknown client protocol=" + protocol + ")"));
+            } else if (protocol < 766) {
+                viewer.sendMessage(CC.translate(
+                        "&7Gravity mode=&evertical additive descent &7client protocol=&f" + protocol));
+            } else {
+                viewer.sendMessage(CC.translate("&7Gravity mode=&anative client attribute"));
+            }
+        } else {
+            viewer.sendMessage(CC.translate("&7Gravity mode=&anative Bot physics"));
+        }
+        viewer.sendMessage(CC.translate("&7Knockback gravity: &f"
+                + manager.getGravityCompensationStatus(target)));
+        viewer.sendMessage(CC.translate("&7range-factor=&f" + settings.rangeFactor()
+                + " &7start-range-reduction=&f" + settings.startRangeReduction()
+                + " &7max-range-reduction=&f" + settings.maxRangeReduction()
+                + " &7min-range=&f" + settings.minRange()));
+        viewer.sendMessage(CC.translate("&7vertical-limit=&f" + settings.verticalLimit()
+                + " &7vertical-limit-value=&f" + settings.verticalLimitValue()
+                + " &7hit_delay=&f" + applied.getHitDelay()));
     }
 
     /**

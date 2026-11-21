@@ -2,6 +2,7 @@ package dev.revere.alley.common.reflect.internal.types;
 
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
+import dev.revere.alley.common.reflect.utility.GameProfileAccess;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Constructor;
@@ -55,7 +56,7 @@ final class LegacyDeathProfile {
         Constructor<?> property = Class.forName(STORAGE + "$Property")
                 .getConstructor(String.class, String.class, String.class);
         List<Object> properties = new ArrayList<>();
-        for (Property value : profile.getProperties().values()) {
+        for (Property value : GameProfileAccess.properties(profile).values()) {
             properties.add(property.newInstance(value.name(), value.value(), value.signature()));
         }
         return new LegacyDeathProfile(eventLoop, storage, profile,
@@ -71,11 +72,11 @@ final class LegacyDeathProfile {
     // Cache mutation and packet translation share the connection's event loop.
     // Reusing the real UUID instead would corrupt ViaRewind's entity/equipment maps.
     void install() throws ReflectiveOperationException {
-        Object entry = put.invoke(storage, profile.getId(), profile.getName(), null, 0, 0);
+        Object entry = put.invoke(storage, GameProfileAccess.id(profile), GameProfileAccess.name(profile), null, 0, 0);
         propertiesField.set(entry, new ArrayList<>(properties));
     }
 
     void remove() throws ReflectiveOperationException {
-        remove.invoke(storage, profile.getId());
+        remove.invoke(storage, GameProfileAccess.id(profile));
     }
 }

@@ -2,6 +2,7 @@ package dev.revere.alley.feature.match.combat.legacy;
 
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.kit.setting.types.combat.*;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.BlocksAttacks;
@@ -80,7 +81,7 @@ public class LegacyCombatService {
     }
 
     public void applyKit(Player player, Kit kit) {
-        if (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)) applySwordBlockKB(player);
+        if (plugin.getService(KnockbackManager.class).usesLegacyCombat(kit)) applySwordBlockKB(player);
         if (kit.isSettingEnabled(KitSettingOldFood.class)) applyOldFood(player);
         if (kit.isSettingEnabled(KitSettingOldOffhand.class)) applyOldOffhand(player);
         if (kit.isSettingEnabled(KitSettingOldEnchantments.class)) applyOldEnchants(player);
@@ -88,7 +89,7 @@ public class LegacyCombatService {
 
     public boolean isKitApplied(Player player, Kit kit) {
         UUID uniqueId = player.getUniqueId();
-        return (!kit.isSettingEnabled(KitSettingOldSwordBlocking.class) || hasSwordBlockKB(uniqueId))
+        return (!plugin.getService(KnockbackManager.class).usesLegacyCombat(kit) || hasSwordBlockKB(uniqueId))
                 && (!kit.isSettingEnabled(KitSettingOldFood.class) || hasOldFood(uniqueId))
                 && (!kit.isSettingEnabled(KitSettingOldOffhand.class) || hasOldOffhand(uniqueId))
                 && (!kit.isSettingEnabled(KitSettingOldEnchantments.class) || hasOldEnchants(uniqueId));

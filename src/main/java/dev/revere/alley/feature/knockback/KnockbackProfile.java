@@ -1,6 +1,7 @@
 package dev.revere.alley.feature.knockback;
 
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
+import dev.revere.alley.feature.knockback.minemen.MinemenClubSettings;
 import lombok.Getter;
 import org.bukkit.configuration.file.FileConfiguration;
 /**
@@ -14,6 +15,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 public class KnockbackProfile {
     private final String name;
     private KnockbackBranch branch;
+    private MinemenClubSettings minemenClub;
     private double horizontalGround, horizontalAir, horizontalSprintExtra, legacyWTapExtra;
     private double verticalGround, verticalAir, verticalSprintExtra;
     private double legacyVerticalLimit;
@@ -61,6 +63,7 @@ public class KnockbackProfile {
     public void reload(FileConfiguration config) {
         KnockbackBranch configuredBranch = KnockbackBranch.fromName(config.getString("branch"));
         branch = configuredBranch == null ? KnockbackBranch.DEFAULT : configuredBranch;
+        minemenClub = MinemenClubSettings.load(config);
         horizontalGround = config.getDouble("horizontal.ground", 0.35);
         horizontalAir = config.getDouble("horizontal.air", 0.35);
         horizontalSprintExtra = config.getDouble("horizontal.sprint_extra", 0.2);
@@ -126,6 +129,17 @@ public class KnockbackProfile {
         packetDelayTicks = config.getInt("packet.delay.ticks", 2);
         hitboxLength = config.getDouble("hitbox.length", 0.6);
         hitboxHeight = config.getDouble("hitbox.height", 1.8);
+        if (branch == KnockbackBranch.MINEMENCLUB) {
+            // Client picking stays at vanilla 3.0; server packet acceptance is
+            // Club's separate historical feet-distance check (36 / 12.75).
+            entityInteractionRange = 3.0D;
+            stopSprint = false;
+            cooldownAffectsKb = false;
+            disableDownwardKb = false;
+            packetMisplaceEnabled = false;
+            packetMisplaceHitCompensation = false;
+            packetDelayEnabled = false;
+        }
     }
 
     private static double positiveOrDefault(double value, double fallback) {

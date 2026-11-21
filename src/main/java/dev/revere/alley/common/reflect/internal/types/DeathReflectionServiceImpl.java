@@ -31,17 +31,17 @@ public final class DeathReflectionServiceImpl implements Reflection {
 
     /** The sound reaches nearby listeners; only the killer receives the corpse. */
     public void animateDeath(Player victim, Player killer) {
-        if (!Bukkit.isPrimaryThread()) {
-            Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> animateDeath(victim, killer));
-            return;
-        }
-        if (victim == null || !victim.isOnline() || victim.isDead()
-                || victim.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG)) return;
-        int tick = Bukkit.getCurrentTick();
-        lastFeedbackTick.entrySet().removeIf(entry -> entry.getValue() != tick);
-        if (lastFeedbackTick.put(victim.getUniqueId(), tick) != null) return;
-
         try {
+            if (!Bukkit.isPrimaryThread()) {
+                Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> animateDeath(victim, killer));
+                return;
+            }
+            if (victim == null || !victim.isOnline() || victim.isDead()
+                    || victim.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG)) return;
+            int tick = Bukkit.getCurrentTick();
+            lastFeedbackTick.entrySet().removeIf(entry -> entry.getValue() != tick);
+            if (lastFeedbackTick.put(victim.getUniqueId(), tick) != null) return;
+
             Location location = victim.getLocation().clone();
             victim.getWorld().playSound(location, Sound.ENTITY_PLAYER_HURT, 1.0F, 1.0F);
             if (killer == null || killer.getUniqueId().equals(victim.getUniqueId())
@@ -68,18 +68,18 @@ public final class DeathReflectionServiceImpl implements Reflection {
                                 for (Object packet : animation.removal()) {
                                     try {
                                         send(killer, packet);
-                                    } catch (RuntimeException exception) {
+                                    } catch (RuntimeException | LinkageError exception) {
                                         warn(exception);
                                     }
                                 }
                             }
                             try {
                                 if (legacyProfile != null) legacyProfile.remove();
-                            } catch (ReflectiveOperationException exception) {
+                            } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
                                 warn(exception);
                             }
                         });
-                    } catch (RuntimeException exception) {
+                    } catch (RuntimeException | LinkageError exception) {
                         warn(exception);
                     }
                 }
@@ -93,16 +93,16 @@ public final class DeathReflectionServiceImpl implements Reflection {
                     try {
                         if (legacyProfile != null) legacyProfile.install();
                         for (Object packet : animation.spawn()) send(killer, packet);
-                    } catch (ReflectiveOperationException | RuntimeException exception) {
+                    } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
                         cleanup.run();
                         warn(exception);
                     }
                 });
-            } catch (RuntimeException exception) {
+            } catch (RuntimeException | LinkageError exception) {
                 cleanup.run();
                 throw exception;
             }
-        } catch (ReflectiveOperationException | RuntimeException exception) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
             warn(exception);
         }
     }
@@ -117,8 +117,10 @@ public final class DeathReflectionServiceImpl implements Reflection {
         protocolManager.sendServerPacket(viewer, PacketContainer.fromPacket(packet), false);
     }
 
-    private void warn(Exception exception) {
+    private void warn(Throwable failure) {
         if (!warned.compareAndSet(false, true)) return;
+        Exception exception = failure instanceof Exception caught ? caught
+                : new IllegalStateException("Incompatible client-only death animation dependency", failure);
         Logger.logException("Could not show client-only death animation; synthetic respawn is unaffected.", exception);
     }
 }

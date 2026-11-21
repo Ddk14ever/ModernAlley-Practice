@@ -4,6 +4,7 @@ import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleIm
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.knockback.KnockbackManager;
+import dev.revere.alley.feature.knockback.KnockbackProfile;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -42,11 +43,17 @@ public class KitSetProfileCommand extends BaseCommand {
             return;
         }
 
-        kit.setKnockbackProfile(args[1]);
-        this.plugin.getService(KnockbackManager.class).synchronizeKitHitDelay(kit);
+        KnockbackManager manager = this.plugin.getService(KnockbackManager.class);
+        KnockbackProfile profile = manager.getProfile(args[1]);
+        if (profile == null) {
+            player.sendMessage("§cUnknown knockback profile: " + args[1]);
+            return;
+        }
+        kit.setKnockbackProfile(profile.getName());
+        manager.synchronizeKitHitDelay(kit);
         kitService.saveKit(kit);
         player.sendMessage(this.getString(GlobalMessagesLocaleImpl.KIT_KB_PROFILE_SET)
-                .replace("{kb-profile}", args[1])
+                .replace("{kb-profile}", profile.getName())
                 .replace("{kit-name}", args[0]));
     }
 }

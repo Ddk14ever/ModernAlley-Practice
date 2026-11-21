@@ -131,6 +131,7 @@ public abstract class Match {
 
     private boolean teamMatch;
     private boolean affectStatistics = true;
+    private boolean deathFeedbackWarningLogged;
 
     private MatchTask runnable;
     private MatchState state;
@@ -892,19 +893,29 @@ public abstract class Match {
 
     /** Presentation only: capture the victim before existing respawn/visibility changes. */
     public void playDeathFeedback(Player victim, DamageSource source) {
-        MatchGamePlayer gamePlayer = this.getFromAllGamePlayers(victim);
-        if (gamePlayer == null || gamePlayer.isDisconnected() || gamePlayer.isDead()
-                || gamePlayer.isEliminated()) return;
+        try {
+            MatchGamePlayer gamePlayer = this.getFromAllGamePlayers(victim);
+            if (gamePlayer == null || gamePlayer.isDisconnected() || gamePlayer.isDead()
+                    || gamePlayer.isEliminated()) return;
 
-        // Cancelled lethal hits never reach CombatService's MONITOR listener.
-        // Use this hit's source first, including projectile/crystal ownership.
-        Player killer = CombatAttribution.getAttacker(source);
-        if (killer == null) killer = this.plugin.getService(CombatService.class).getLastAttacker(victim);
-        if (killer != null && (killer == victim || this.getFromAllGamePlayers(killer) == null)) killer = null;
+            // Cancelled lethal hits never reach CombatService's MONITOR listener.
+            // Use this hit's source first, including projectile/crystal ownership.
+            Player killer = CombatAttribution.getAttacker(source);
+            if (killer == null) killer = this.plugin.getService(CombatService.class).getLastAttacker(victim);
+            if (killer != null && (killer == victim || this.getFromAllGamePlayers(killer) == null)) killer = null;
 
-        DeathReflectionServiceImpl feedback = this.plugin.getService(ReflectionService.class)
-                .getReflectionService(DeathReflectionServiceImpl.class);
-        if (feedback != null) feedback.animateDeath(victim, killer);
+            DeathReflectionServiceImpl feedback = this.plugin.getService(ReflectionService.class)
+                    .getReflectionService(DeathReflectionServiceImpl.class);
+            if (feedback != null) feedback.animateDeath(victim, killer);
+        } catch (RuntimeException | LinkageError failure) {
+            // This boundary also covers service lookup/linking. Presentation must
+            // never abort lethal-hit, scripted Sumo or Boxing match resolution.
+            if (!deathFeedbackWarningLogged) {
+                deathFeedbackWarningLogged = true;
+                Logger.logException("Death feedback failed; continuing match elimination.",
+                        new IllegalStateException("Client-only death feedback failed", failure));
+            }
+        }
     }
 
     /**

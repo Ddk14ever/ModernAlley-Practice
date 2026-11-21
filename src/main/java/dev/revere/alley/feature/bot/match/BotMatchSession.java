@@ -18,7 +18,6 @@ import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.hotbar.HotbarType;
 import dev.revere.alley.feature.kit.Kit;
-import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBreakArenaBlocksImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBuildImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingDisableSwimmingImpl;
@@ -1064,7 +1063,7 @@ public final class BotMatchSession {
     }
 
     private boolean usesLegacyBotMovement() {
-        return kit.isSettingEnabled(KitSettingOldSwordBlocking.class);
+        return AlleyPlugin.getInstance().getService(KnockbackManager.class).usesLegacyCombat(kit);
     }
 
     private double approach(double current, double target, double maximumStep) {
@@ -1131,7 +1130,7 @@ public final class BotMatchSession {
         // Legacy combat keeps the same movement attribute as a normal player.
         // The Bot still supplies its regular W/strafe input while knocked back;
         // difficulty must not make that input accelerate through Legacy KB faster.
-        double movementMultiplier = kit.isSettingEnabled(KitSettingOldSwordBlocking.class)
+        double movementMultiplier = usesLegacyBotMovement()
                 ? 1.0D : difficulty.getMovementSpeed();
         movement.setBaseValue(0.1D * movementMultiplier);
     }
@@ -1283,7 +1282,7 @@ public final class BotMatchSession {
         Vector velocityBeforeAttack = applyLegacySlowdown ? bot.getVelocity().clone() : null;
         // W-tap is a Legacy-only mechanic: it grants the 1_8 profile's wtap_extra
         // through LegacySprintTracker, so other branches must not stutter for it.
-        boolean useWTap = usesLegacyBotMovement()
+        boolean useWTap = manager.isLegacyKnockback(bot)
                 && difficulty.isWTap() && isInActiveTrade()
                 && ThreadLocalRandom.current().nextDouble() < difficulty.getWTapRate();
         this.pendingWTap = useWTap;
@@ -1300,6 +1299,7 @@ public final class BotMatchSession {
         // A marker left behind here belongs to a failed swing, not a later hit.
         boolean accepted = this.attackAcceptedThisSwing;
         this.pendingWTap = false;
+        if (manager.isMinemenClubKnockback(bot)) finishBotBlockHit();
         if (velocityBeforeAttack != null) {
             // A ServerPlayer already received the engine's vanilla 0.6 attacker
             // cut when i > 0. The old code multiplied by the profile value on
@@ -1573,7 +1573,7 @@ public final class BotMatchSession {
     }
 
     private BoundingBox getCombatTargetBox() {
-        if (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)) {
+        if (usesLegacyBotMovement()) {
             return LegacyHitboxes.meleeTarget(player);
         }
 
@@ -2210,7 +2210,7 @@ public final class BotMatchSession {
         int powerLevel = this.chargingBow == null ? 0 : this.chargingBow.getEnchantmentLevel(Enchantment.POWER);
         arrow.setCritical(BOW_CHARGE_TICKS >= 20);
         arrow.setDamage(2.0 + powerLevel * 0.5);
-        if (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)) {
+        if (usesLegacyBotMovement()) {
             LegacyProjectileData.markArrow(arrow, punch, powerLevel);
         } else {
             LegacyProjectileData.storeBowPunch(arrow, punch);

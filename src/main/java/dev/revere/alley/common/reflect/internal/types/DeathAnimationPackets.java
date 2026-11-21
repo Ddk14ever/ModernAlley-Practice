@@ -1,6 +1,7 @@
 package dev.revere.alley.common.reflect.internal.types;
 
 import com.mojang.authlib.GameProfile;
+import dev.revere.alley.common.reflect.utility.GameProfileAccess;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -24,8 +25,8 @@ record DeathAnimationPackets(GameProfile profile, List<Object> spawn, List<Objec
 
         // A different UUID is essential even on 1.7: ViaRewind maintains a reverse
         // UUID -> entity ID map and must never confuse the corpse with the victim.
-        GameProfile profile = new GameProfile(UUID.randomUUID(), originalProfile.getName());
-        profile.getProperties().putAll(originalProfile.getProperties());
+        UUID profileId = UUID.randomUUID();
+        GameProfile profile = GameProfileAccess.copyWithId(originalProfile, profileId);
         Object craftServer = Bukkit.getServer();
         Object server = craftServer.getClass().getMethod("getServer").invoke(craftServer);
         Object level = victim.getWorld().getClass().getMethod("getHandle").invoke(victim.getWorld());
@@ -65,7 +66,7 @@ record DeathAnimationPackets(GameProfile profile, List<Object> spawn, List<Objec
         packets.add(packet("ClientboundAddEntityPacket").getConstructor(int.class, UUID.class,
                         double.class, double.class, double.class, float.class, float.class,
                         nms("world.entity.EntityType"), int.class, nms("world.phys.Vec3"), double.class)
-                .newInstance(id, profile.getId(), location.getX(), location.getY(), location.getZ(),
+                .newInstance(id, profileId, location.getX(), location.getY(), location.getZ(),
                         location.getPitch(), location.getYaw(), entity.getMethod("getType").invoke(corpse),
                         0, entity.getMethod("getDeltaMovement").invoke(corpse), (double) location.getYaw()));
         packets.add(packet("ClientboundSetEntityDataPacket").getConstructor(int.class, List.class)
@@ -85,7 +86,7 @@ record DeathAnimationPackets(GameProfile profile, List<Object> spawn, List<Objec
                 .newInstance((Object) new int[]{id}));
         if (!legacy17) {
             removal.add(packet("ClientboundPlayerInfoRemovePacket").getConstructor(List.class)
-                    .newInstance(List.of(profile.getId())));
+                    .newInstance(List.of(profileId)));
         }
         return new DeathAnimationPackets(profile, List.copyOf(packets), List.copyOf(removal));
     }
@@ -95,7 +96,7 @@ record DeathAnimationPackets(GameProfile profile, List<Object> spawn, List<Objec
         Object value = entry.getConstructor(UUID.class, GameProfile.class, boolean.class, int.class,
                         nms("world.level.GameType"), nms("network.chat.Component"), boolean.class, int.class,
                         nms("network.chat.RemoteChatSession$Data"))
-                .newInstance(profile.getId(), profile, false, 0, constant("world.level.GameType", "SURVIVAL"),
+                .newInstance(GameProfileAccess.id(profile), profile, false, 0, constant("world.level.GameType", "SURVIVAL"),
                         null, true, 0, null);
         Object actions = actions("ADD_PLAYER", "UPDATE_LISTED", "UPDATE_GAME_MODE", "UPDATE_HAT");
         return packet("ClientboundPlayerInfoUpdatePacket").getConstructor(EnumSet.class, List.class)

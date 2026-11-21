@@ -1,0 +1,52 @@
+# Independent ClubSpigot-style branch. Select with /kit setprofile <kit> MinemenClub.
+# Based on the supplied fanmade ClubSpigot source, not the private Minemen server core.
+branch: MinemenClub
+horizontal: 0.8855
+vertical: 0.26335
+# Divide inherited X/Z by this value on every accepted base knockback.
+# 2 = retain half; 1 = retain all; below 1 amplifies existing motion.
+# Independent of horizontal. This value preserves the old 1 + 0.8755 divisor.
+# Base Y is replaced by vertical; melee/Punch extras are added AFTER friction.
+friction:
+  horizontal: 2.0755
+# Gravity ONLY during descent after a delivered knockback; vanilla 0.08, range [-1, 1].
+# Normal jumps, natural falls, and the knockback ascent keep their original gravity.
+# Landing, teleport, death, reload, or another hit ends the current descent effect.
+# Smaller positive values fall slower; 0 disables downward acceleration in this phase.
+# Native for Bots / 1.20.5+; 1.7/1.8 and other old clients use vertical-only impulses.
+# Waits for post-hit movement (ping + 100ms); fluids, ladders and flight end the effect.
+# Does not replace X/Z or write server motion. Phase timing is approximate under latency.
+# Unknown client protocols are skipped. Vanilla 0.08 sends no compensation packets.
+gravity: 0.067
+# Despite the original name, this extra applies to EVERY successful player melee.
+sprint-multiplier: 0.625
+range-factor: 0.035
+# Original Club field names: max-range-reduction is subtracted from distance;
+# min-range is the maximum reduction. The threshold deliberately has a jump.
+max-range-reduction: 0.4
+start-range-reduction: 2.95
+min-range: 0.12
+# Applied to base Y before the +0.1 melee / Punch extras.
+vertical-limit: true
+vertical-limit-value: 4.0
+# Full NMS hurt window; the upper half accepts only larger damage supplements.
+hit_delay: 20
+hit_delay_format: nms_window
+hitbox:
+  length: 0.6
+  height: 1.8
+# Keep the current old combat potion trajectory; unrelated to the new KB formula.
+potion:
+  enabled: true
+  horizontal_multiplier: 0.715
+  vertical_multiplier: 0.95
+  compensation_multiplier: 0.95
+  speed_compensation: 0.2
+  horizontal_compensation: 0.42
+  horizontal_offset: 0.25
+  vertical_offset: 0.01
+modern:
+  # Fixed vanilla client pick distance in this branch, including old deployments.
+  # The separate Club server acceptance cap does not extend client picking.
+  entity_interaction_range: 3.1
+# No y_limit, W-tap extra, legacy arrow overrides, misplace or position packet delay.

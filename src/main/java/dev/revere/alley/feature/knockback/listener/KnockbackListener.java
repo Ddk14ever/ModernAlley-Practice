@@ -171,6 +171,7 @@ public class KnockbackListener implements Listener {
         // Default nor Legacy can queue a later velocity packet.
         if (victim.hasMetadata("alley_weapon_no_kb")) return;
         PlayerKnockbackData data = manager.getPlayerData(victim);
+        if (data.getBranch() == KnockbackBranch.MINEMENCLUB) return;
         if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK
                 && event.getDamager() instanceof Player attacker
                 && manager.isLegacyKnockback(attacker)
@@ -610,6 +611,7 @@ public class KnockbackListener implements Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void applyVelocity(PlayerVelocityEvent event) {
         PlayerKnockbackData data = manager.getPlayerData(event.getPlayer());
+        if (data.getBranch() == KnockbackBranch.MINEMENCLUB) return;
         if (data.isSuppressLegacyPearlVelocity()) {
             data.setCaptureServerControlledVelocity(false);
             data.setServerControlledVelocity(null);
@@ -633,6 +635,7 @@ public class KnockbackListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void retainServerControlledVelocity(PlayerVelocityEvent event) {
         PlayerKnockbackData data = manager.getPlayerData(event.getPlayer());
+        if (data.getBranch() == KnockbackBranch.MINEMENCLUB) return;
         if (!data.isCaptureServerControlledVelocity()) return;
 
         data.setCaptureServerControlledVelocity(false);

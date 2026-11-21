@@ -109,12 +109,14 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onBlockReduction(EntityDamageByEntityEvent e) {
         if (!(e.getEntity() instanceof Player victim)) return;
+        // Club accepts and subtracts the complete incoming amount first. Its
+        // combat listener then evaluates sword blocking on that damage delta.
+        if (plugin().getService(KnockbackManager.class).isMinemenClubKnockback(victim)) return;
         if (!isLegacyBlockableDamage(e)) return;
         if (!svc.isBlocking(victim.getUniqueId())) return;
         ItemStack main = victim.getInventory().getItemInMainHand();
         if (!main.getType().name().endsWith("_SWORD")) return;
 
-        // 80% block success rate
         if (blockRng.nextDouble() > 0.8) {
             if (e.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)) {
                 e.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, 0.0);
@@ -740,6 +742,11 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onArmourStrength(EntityDamageEvent e) {
         if (!(e.getEntity() instanceof Player p)) return;
+        KnockbackManager knockback = plugin().getService(KnockbackManager.class);
+        if (knockback.isMinemenClubKnockback(p)) {
+            knockback.prepareMinemenClubDamage(e);
+            if (e.isCancelled()) return;
+        }
         if (!svc.hasOldEnchants(p.getUniqueId())) return;
 
         double damage = damageBeforeArmour(e);

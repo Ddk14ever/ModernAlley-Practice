@@ -3,7 +3,8 @@ package dev.revere.alley.feature.knockback;
 /** Selects the independent knockback implementation used by a profile. */
 public enum KnockbackBranch {
     DEFAULT,
-    LEGACY;
+    LEGACY,
+    MINEMENCLUB;
 
     public static KnockbackBranch fromName(String name) {
         if (name == null || name.isBlank()) return null;

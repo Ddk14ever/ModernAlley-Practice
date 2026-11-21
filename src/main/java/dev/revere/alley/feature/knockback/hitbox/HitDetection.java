@@ -48,6 +48,9 @@ public class HitDetection implements Listener {
     public void onSwing(PlayerAnimationEvent event) {
         if (event.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
         Player attacker = event.getPlayer();
+        // Club validates the explicit ATTACK target and never turns an empty
+        // arm swing into another server-selected melee attack.
+        if (manager.isMinemenClubKnockback(attacker)) return;
         if (!isMeleeWeapon(attacker.getInventory().getItemInMainHand().getType())) return;
 
         KnockbackProfile profile = manager.getAppliedProfile(attacker);
@@ -216,7 +219,7 @@ public class HitDetection implements Listener {
         Vector velocityBeforeAttack = applyLegacySlowdown ? attacker.getVelocity().clone() : null;
         data.setServerSideHit(true);
         try {
-            attacker.attack(target);
+            manager.attack(attacker, target);
         } finally {
             data.setServerSideHit(false);
         }

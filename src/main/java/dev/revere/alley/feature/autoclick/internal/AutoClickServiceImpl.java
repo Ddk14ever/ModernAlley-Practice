@@ -583,25 +583,26 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
         PlayerKnockbackData data = this.knockbackManager.getPlayerData(attacker);
         Vector velocityBeforeAttack = attacker.getVelocity().clone();
         boolean legacyKnockback = this.knockbackManager.isLegacyKnockback(attacker);
+        boolean clubKnockback = this.knockbackManager.isMinemenClubKnockback(attacker);
         boolean hasKnockbackEnchant = attacker.getInventory().getItemInMainHand()
                 .getEnchantmentLevel(Enchantment.KNOCKBACK) > 0;
-        boolean shouldApplyAttackerSlowdown = legacyKnockback
+        boolean shouldApplyAttackerSlowdown = !clubKnockback && (legacyKnockback
                 ? this.knockbackManager.hasLegacySprintKnockback(attacker) || hasKnockbackEnchant
-                : attacker.isSprinting() || hasKnockbackEnchant;
+                : attacker.isSprinting() || hasKnockbackEnchant);
         KnockbackProfile knockbackProfile = this.knockbackManager.getAppliedProfile(attacker);
         double horizontalSlowdown = legacyKnockback
                 && knockbackProfile != null
                 ? knockbackProfile.getLegacyAttackerHorizontalSlowdown() : 0.6D;
         data.setServerSideHit(true);
         try {
-            attacker.attack(victim);
+            this.knockbackManager.attack(attacker, victim);
         } finally {
             data.setServerSideHit(false);
         }
 
-        // A synthetic attack may clear the active-use state. The physical
-        // right button is still held, so restore the sword block immediately.
-        if (session.rightClickHeld && session.canLegacyBlock) {
+        // Keep held blocking for existing branches. Club deliberately clears active
+        // use at the end of a hit; the next held-input update may raise the sword.
+        if (!clubKnockback && session.rightClickHeld && session.canLegacyBlock) {
             startLegacyBlocking(attacker.getUniqueId());
         }
 
